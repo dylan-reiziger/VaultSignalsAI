@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VaultSignals</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='vaultsignals-logo.png') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body data-vat-rate="{{ ui_config.vat_rate }}" data-currency-symbol="{{ ui_config.currency_symbol }}" data-default-currency-code="{{ ui_config.default_currency_code }}">
+    <canvas id="marketCanvas"></canvas>
+    <div class="site-shell">
+      <div class="animated-bg">
+        <span class="glow glow-1"></span>
+        <span class="glow glow-2"></span>
+        <span class="glow glow-3"></span>
+        <div class="market-lines"></div>
+      </div>
+
+      <header class="navbar">
+        <div class="brand">
+          <div class="logo" aria-label="Vault Signals logo">
+            <img class="logo-img" src="{{ url_for('static', filename='vaultsignals-logo.png') }}" alt="Vault Signals logo" />
+          </div>
+          <div>
+            <p class="eyebrow">Premium Signals</p>
+            <h2 class="brand-title">VaultSignals</h2>
+          </div>
+        </div>
+
+        <nav class="nav-links" id="navLinks">
+          <a href="/">Home</a>
+          <a href="/price">Price</a>
+          <a class="hidden" data-member-portal-link href="/your-signals">Your Signals</a>
+          <a href="/about-us">About Us</a>
+          <a class="hidden" data-member-portal-link href="/account/dashboard#community-hub-section">Community</a>
+          <a href="#feedback">Feedback</a>
+        </nav>
+
+        <div class="nav-actions">
+          <a class="bitvavo-btn" href="{{ ui_config.bitvavo_url }}" target="_blank" rel="noreferrer">Bitvavo</a>
+          <button class="ghost-btn nav-login-btn" data-login-trigger type="button">Log In</button>
+          <a href="/settings" class="nav-settings-btn" title="Settings" aria-label="Settings">⚙</a>
+          <button class="menu-btn" id="menuToggle" aria-label="Open menu">☰</button>
+        </div>
+      </header>
+
+      <main>
+        <section class="section visible">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Agreement</p>
+              <h2>VaultSignalsAI Terms and Conditions</h2>
+              <p class="section-copy">By using this platform, purchasing signals, or accessing billing and account features, you agree to the terms below.</p>
+            </div>
+          </div>
+
+          <article class="panel-card">
+            <h3>1. Informational Signals Only</h3>
+            <p>All signals, analytics, and content are provided for informational and educational purposes only. Nothing on this platform constitutes financial advice, investment advice, legal advice, tax advice, or a guaranteed trading outcome.</p>
+
+            <h3>2. No Liability</h3>
+            <p>VaultSignalsAI, its operators, partners, and contributors are not liable for any direct or indirect losses, damages, missed opportunities, technical interruptions, delayed signals, account issues, third-party outages, payment issues, or market results resulting from the use of this platform.</p>
+
+            <h3>3. User Responsibility</h3>
+            <p>You are fully responsible for your own trades, account security, risk management, and financial decisions. You confirm that you understand the risks of trading and using digital services.</p>
+
+            <h3>4. Payments and Billing</h3>
+            <p>All purchases, billing selections, and payment method choices are made by the user. Prices, taxes, and available billing methods may change. Failed or interrupted external payment flows are handled according to payment provider availability and policies.</p>
+
+            <h3>4A. Currency Display Preference</h3>
+            <p>Currency display may be suggested from coarse regional request hints or browser locale so prices are easier to read. This preference can always be changed manually in the site footer, and raw IP addresses are not stored for this display setting.</p>
+
+            <h3>5. Support</h3>
+            <p>If something goes wrong, contact support at <a href="mailto:support@vaultsignalsai.com">support@vaultsignalsai.com</a>. We will review issues in good faith, but we do not guarantee specific financial outcomes or compensation.</p>
+
+            <h3>6. Intellectual Property and Copyright</h3>
+            <p>All platform content, signal systems, billing flows, code structures, branding, design assets, and operational logic are protected and remain the exclusive property of VaultSignalsAI. Unauthorized copying, resale, reverse engineering, redistribution, or commercial reuse is prohibited.</p>
+
+            <h3>7. Account Access</h3>
+            <p>We reserve the right to suspend, restrict, or terminate access for fraud, abuse, unauthorized usage, payment disputes, or violations of these terms.</p>
+
+            <h3>8. Changes to Terms</h3>
+            <p>These terms may be updated at any time. Continued use of VaultSignalsAI after updates means acceptance of the latest version.</p>
+
+            <h3>9. Governing Principle</h3>
+            <p>Use of this service is at your own risk. If you do not agree to these terms, do not use the platform.</p>
+          </article>
+        </section>
+        {% include 'sections/site_footer.html' %}
+      </main>
+    </div>
+
+    {% include 'auth_modal.html' %}
+    {% include 'feedback_modal.html' %}
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+  </body>
+</html>

@@ -1,0 +1,74 @@
+[
+  {
+    "tier_number": 1,
+    "asset_symbol": "BTC",
+    "market": "Bitcoin",
+    "direction": "Long",
+    "entry_price": 82150,
+    "target_price": 84600,
+    "stop_price": 80880,
+    "confidence_label": "Core",
+    "session_label": "London Open",
+    "thesis": "Momentum reclaimed the overnight range high with spot-led follow-through."
+  },
+  {
+    "tier_number": 2,
+    "asset_symbol": "ETH",
+    "market": "Ethereum",
+    "direction": "Long",
+    "entry_price": 4065,
+    "target_price": 4195,
+    "stop_price": 3988,
+    "confidence_label": "Core+",
+    "session_label": "Europe Midday",
+    "thesis": "ETH/BTC strength is holding while funding stays controlled, leaving room for continuation."
+  },
+  {
+    "tier_number": 3,
+    "asset_symbol": "SOL",
+    "market": "Solana",
+    "direction": "Long",
+    "entry_price": 188.2,
+    "target_price": 196.8,
+    "stop_price": 183.5,
+    "confidence_label": "Active",
+    "session_label": "US Pre-Market",
+    "thesis": "Relative strength remains intact after a shallow pullback into prior demand."
+  },
+  {
+    "tier_number": 4,
+    "asset_symbol": "XRP",
+    "market": "XRP",
+    "direction": "Short",
+    "entry_price": 0.684,
+    "target_price": 0.651,
+    "stop_price": 0.701,
+    "confidence_label": "Premium",
+    "session_label": "US Open",
+    "thesis": "Failed breakout structure with declining spot volume favors a fade back into support."
+  },
+  {
+    "tier_number": 5,
+    "asset_symbol": "ADA",
+    "market": "Cardano",
+    "direction": "Long",
+    "entry_price": 0.812,
+    "target_price": 0.854,
+    "stop_price": 0.789,
+    "confidence_label": "Pro",
+    "session_label": "US Midday",
+    "thesis": "The daily trend remains constructive and intraday buyers defended the VWAP retest."
+  },
+  {
+    "tier_number": 6,
+    "asset_symbol": "BNB",
+    "market": "BNB",
+    "direction": "Long",
+    "entry_price": 712,
+    "target_price": 739,
+    "stop_price": 698,
+    "confidence_label": "Elite",
+    "session_label": "US Close",
+    "thesis": "Late-session compression above support creates a breakout continuation setup."
+  }
+]

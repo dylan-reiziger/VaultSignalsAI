@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VaultSignals</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='vaultsignals-logo.png') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body data-vat-rate="{{ ui_config.vat_rate }}" data-currency-symbol="{{ ui_config.currency_symbol }}" data-default-currency-code="{{ ui_config.default_currency_code }}">
+    <canvas id="marketCanvas"></canvas>
+    <div class="site-shell">
+      <div class="animated-bg">
+        <span class="glow glow-1"></span>
+        <span class="glow glow-2"></span>
+        <span class="glow glow-3"></span>
+        <div class="market-lines"></div>
+      </div>
+
+      <header class="navbar">
+        <div class="brand">
+          <div class="logo" aria-label="Vault Signals logo">
+            <img class="logo-img" src="{{ url_for('static', filename='vaultsignals-logo.png') }}" alt="Vault Signals logo" />
+          </div>
+          <div>
+            <p class="eyebrow">Premium Signals</p>
+            <h2 class="brand-title">VaultSignals</h2>
+          </div>
+        </div>
+
+        <nav class="nav-links" id="navLinks">
+          <a href="/">Home</a>
+          <a href="/price">Price</a>
+          <a class="hidden" data-member-portal-link href="/your-signals">Your Signals</a>
+          <a href="/about-us">About Us</a>
+          <a class="hidden" data-member-portal-link href="/account/dashboard#community-hub-section">Community</a>
+          <a href="#feedback">Feedback</a>
+        </nav>
+
+        <div class="nav-actions">
+          <a class="bitvavo-btn" href="{{ ui_config.bitvavo_url }}" target="_blank" rel="noreferrer">Bitvavo</a>
+          <button class="ghost-btn nav-login-btn" data-login-trigger type="button">Log In</button>
+          <a href="/settings" class="nav-settings-btn" title="Settings" aria-label="Settings">⚙</a>
+          <button class="menu-btn" id="menuToggle" aria-label="Open menu">☰</button>
+        </div>
+      </header>
+
+      <main>
+        <section class="settings-quickbar-shell" aria-label="Settings quick access">
+          <div class="settings-page-shell settings-quickbar">
+            <a href="/account/profile" class="settings-avatar-link">
+              <span class="settings-avatar-badge">
+                <img id="settingsAvatarPreview" src="{{ url_for('static', filename='vaultsignals-logo.png') }}" alt="Your account avatar" />
+                <span class="settings-avatar-overlay">Open</span>
+              </span>
+              <span class="settings-avatar-copy">
+                <strong>Personal details</strong>
+                <span>Avatar, name, email, phone and address</span>
+              </span>
+            </a>
+            <nav class="settings-quickbar-nav">
+              <a class="settings-quickbar-link" href="#settings-community-section">Community</a>
+              <a class="settings-quickbar-link" href="#settings-privacy-section">Privacy</a>
+              <a class="settings-quickbar-link" href="#settings-preferences-section">Preferences</a>
+              <a class="settings-quickbar-link" href="#settings-membership-section">Membership</a>
+            </nav>
+          </div>
+        </section>
+
+        <section class="settings-page-shell settings-page-intro">
+          <div class="settings-page-title">
+            <p class="eyebrow">Account Control Center</p>
+            <h1 class="settings-page-heading">Settings</h1>
+            <p class="settings-page-lede">Your preferences are grouped into clear sections and saved together with one action, while personal identity details now live behind the avatar shortcut above.</p>
+          </div>
+          <div class="settings-page-hero-panel">
+            <p class="settings-panel-kicker">How this page works</p>
+            <div class="settings-hero-pill-row">
+              <span class="settings-hero-pill">One save button</span>
+              <span class="settings-hero-pill">Sectioned layout</span>
+              <span class="settings-hero-pill">Quick access bar</span>
+              <span class="settings-hero-pill">Avatar opens account page</span>
+            </div>
+            <p class="settings-page-hero-copy">Use this page for platform preferences only. Use the avatar circle to manage personal account information and your profile image.</p>
+          </div>
+        </section>
+
+        <form id="settingsUnifiedForm" class="settings-page-shell settings-page-form">
+          <div class="settings-page-stack">
+            <section id="settings-community-section" class="settings-section-card">
+              <div class="settings-section-head">
+                <div class="settings-card-head">
+                  <p class="settings-card-kicker">Community</p>
+                  <h3>Community profile</h3>
+                  <p class="settings-card-copy">Keep your community identity clean here. Avatar management has been moved to your personal account page.</p>
+                </div>
+                <a href="/account/profile" class="ghost-btn settings-inline-link">Open personal details</a>
+              </div>
+              <div class="settings-section-grid">
+                <label>
+                  <span>Display Name</span>
+                  <input id="settingsDisplayName" type="text" maxlength="50" placeholder="Your display name" />
+                </label>
+                <div class="settings-inline-note">
+                  <strong>Avatar control</strong>
+                  <p>The profile image now lives on the dedicated account page so this settings view stays focused on platform preferences.</p>
+                </div>
+              </div>
+              <label>
+                <span>Bio</span>
+                <textarea id="settingsBio" maxlength="400" rows="4" placeholder="Short intro shown on your community profile."></textarea>
+              </label>
+            </section>
+
+            <section id="settings-privacy-section" class="settings-section-card">
+              <div class="settings-card-head">
+                <p class="settings-card-kicker">Privacy</p>
+                <h3>Visibility and messaging</h3>
+                <p class="settings-card-copy">Choose who can see your profile and how open your inbox should be inside the community.</p>
+              </div>
+              <div class="settings-section-grid settings-section-grid--privacy">
+                <label>
+                  <span>Privacy Mode</span>
+                  <select id="settingsPrivacyMode">
+                    <option value="public">Public — everyone sees your profile</option>
+                    <option value="private">Private — hide balance and remove from leaderboards</option>
+                  </select>
+                </label>
+                <div class="settings-switch-list">
+                  <label class="settings-switch-row">
+                    <span class="settings-switch-copy">
+                      <span class="settings-switch-title">Leaderboard visibility</span>
+                      <span class="settings-switch-desc">Show your profile and rank in community leaderboard results.</span>
+                    </span>
+                    <span class="settings-switch-control">
+                      <input id="settingsLeaderboard" type="checkbox" checked />
+                      <span class="settings-switch-slider" aria-hidden="true"></span>
+                    </span>
+                  </label>
+                  <label class="settings-switch-row">
+                    <span class="settings-switch-copy">
+                      <span class="settings-switch-title">Whisper message requests</span>
+                      <span class="settings-switch-desc">Block unsolicited whisper messages from members you do not follow.</span>
+                    </span>
+                    <span class="settings-switch-control">
+                      <input id="settingsIgnoreWhisper" type="checkbox" />
+                      <span class="settings-switch-slider" aria-hidden="true"></span>
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </section>
+
+            <section id="settings-preferences-section" class="settings-section-card">
+              <div class="settings-card-head">
+                <p class="settings-card-kicker">Experience</p>
+                <h3>Layout, billing, currency and notifications</h3>
+                <p class="settings-card-copy">Keep your dashboard behaviour, billing preference, and alert settings together in one place.</p>
+              </div>
+              <div class="settings-section-grid">
+                <label>
+                  <span>Layout Style</span>
+                  <select id="settingsLayoutPreset">
+                    <option value="default">Default</option>
+                    <option value="compact">Compact</option>
+                    <option value="cards">Cards</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Preferred Billing Method</span>
+                  <select id="settingsPreferredBillingMethod">
+                    <option value="paypal">PayPal</option>
+                    <option value="ideal">iDEAL</option>
+                    <option value="creditcard">Credit Card</option>
+                  </select>
+                </label>
+              </div>
+              <label>
+                <span>Display Currency</span>
+                <select id="settingsCurrencyCode"></select>
+              </label>
+              <div class="settings-switch-list settings-switch-list--split">
+                <label class="settings-switch-row">
+                  <span class="settings-switch-copy">
+                    <span class="settings-switch-title">Email alerts</span>
+                    <span class="settings-switch-desc">Receive account and security updates by email.</span>
+                  </span>
+                  <span class="settings-switch-control">
+                    <input id="settingsEmailAlerts" type="checkbox" />
+                    <span class="settings-switch-slider" aria-hidden="true"></span>
+                  </span>
+                </label>
+                <label class="settings-switch-row">
+                  <span class="settings-switch-copy">
+                    <span class="settings-switch-title">Market alerts</span>
+                    <span class="settings-switch-desc">Enable quick alerts for large market movements.</span>
+                  </span>
+                  <span class="settings-switch-control">
+                    <input id="settingsMarketAlerts" type="checkbox" />
+                    <span class="settings-switch-slider" aria-hidden="true"></span>
+                  </span>
+                </label>
+                <label class="settings-switch-row">
+                  <span class="settings-switch-copy">
+                    <span class="settings-switch-title">Renewal reminders</span>
+                    <span class="settings-switch-desc">Get reminders before your subscription renews.</span>
+                  </span>
+                  <span class="settings-switch-control">
+                    <input id="settingsRenewalReminders" type="checkbox" />
+                    <span class="settings-switch-slider" aria-hidden="true"></span>
+                  </span>
+                </label>
+              </div>
+            </section>
+
+            <section id="settings-membership-section" class="settings-section-card settings-section-card--info">
+              <div class="settings-card-head">
+                <p class="settings-card-kicker">Membership</p>
+                <h3>Account overview</h3>
+                <p class="settings-card-copy">A quick read on your active tier and automatically assigned rank.</p>
+              </div>
+              <div class="settings-info-grid">
+                <div class="settings-info-tile">
+                  <p class="settings-info-label">Active tier</p>
+                  <p id="settingsTierDisplay" class="settings-info-value">Loading...</p>
+                </div>
+                <div class="settings-info-tile">
+                  <p class="settings-info-label">Rank</p>
+                  <p id="settingsRankDisplay" class="settings-info-value settings-info-value--rank">-</p>
+                </div>
+              </div>
+              <p class="settings-account-note">Rank is assigned automatically from your active tier and updates when your membership changes.</p>
+            </section>
+          </div>
+
+          <div class="settings-save-bar">
+            <div>
+              <p class="settings-panel-kicker">Save all</p>
+              <p class="settings-page-hero-copy">One save updates every preference section on this page.</p>
+            </div>
+            <button id="settingsSaveButton" type="submit" class="primary-btn settings-save-btn">Save all settings</button>
+          </div>
+
+          <div id="settingsGlobalMsg" class="billing-message settings-page-message">Your settings changes will be saved together.</div>
+        </form>
+        {% include 'sections/site_footer.html' %}
+      </main>
+    </div>
+
+    {% include 'auth_modal.html' %}
+    {% include 'feedback_modal.html' %}
+
+    <script>
+      window.VAULT_TIERS = JSON.parse('{{ tiers | tojson | safe }}');
+    </script>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <script>
+      // Load account and community settings for this page.
+      (async function () {
+        const form = document.getElementById('settingsUnifiedForm');
+        const saveButton = document.getElementById('settingsSaveButton');
+
+        function setMsg(text, ok) {
+          const el = document.getElementById('settingsGlobalMsg');
+          if (!el) return;
+          el.textContent = text;
+          el.style.color = ok ? '#84f5a9' : 'rgba(255,255,255,0.78)';
+          el.style.borderColor = ok ? 'rgba(76,239,120,0.45)' : 'rgba(255,255,255,0.12)';
+        }
+
+        async function parseResponse(res) {
+          try {
+            return await res.json();
+          } catch (_) {
+            return { ok: false, message: 'Unexpected server response.' };
+          }
+        }
+
+        function fillCurrencyOptions(catalog, selectedCode) {
+          const currencySelect = document.getElementById('settingsCurrencyCode');
+          if (!currencySelect || !Array.isArray(catalog)) return;
+          currencySelect.innerHTML = '';
+          for (const item of catalog) {
+            const option = document.createElement('option');
+            option.value = item.code;
+            option.textContent = `${item.code} (${item.symbol}) - ${item.label}`;
+            currencySelect.appendChild(option);
+          }
+          currencySelect.value = selectedCode || currencySelect.value;
+        }
+
+        async function loadSettings() {
+          const [summaryRes, sessionRes] = await Promise.all([
+            fetch('/api/community/summary'),
+            fetch('/api/session'),
+          ]);
+          if (summaryRes.status === 401 || sessionRes.status === 401) {
+            window.location.href = '/?login=1';
+            return;
+          }
+          if (!summaryRes.ok) return;
+
+          const summaryData = await parseResponse(summaryRes);
+          const sessionData = sessionRes.ok ? await parseResponse(sessionRes) : {};
+          const acc = summaryData.account || {};
+
+          const dn = document.getElementById('settingsDisplayName');
+          const bio = document.getElementById('settingsBio');
+          const lb = document.getElementById('settingsLeaderboard');
+          const pm = document.getElementById('settingsPrivacyMode');
+          const iw = document.getElementById('settingsIgnoreWhisper');
+          const lp = document.getElementById('settingsLayoutPreset');
+          const pb = document.getElementById('settingsPreferredBillingMethod');
+          const ea = document.getElementById('settingsEmailAlerts');
+          const ma = document.getElementById('settingsMarketAlerts');
+          const rr = document.getElementById('settingsRenewalReminders');
+          const td = document.getElementById('settingsTierDisplay');
+          const rd = document.getElementById('settingsRankDisplay');
+          const avatar = document.getElementById('settingsAvatarPreview');
+
+          if (dn) dn.value = acc.displayName || '';
+          if (bio) bio.value = acc.bio || '';
+          if (lb) lb.checked = Boolean(acc.showOnLeaderboard);
+          if (pm) pm.value = acc.privacyMode || 'public';
+          if (iw) iw.checked = Boolean(acc.ignoreWhisper);
+          if (lp) lp.value = acc.layoutPreset || 'default';
+          if (pb) pb.value = acc.preferredBillingMethod || 'paypal';
+          if (ea) ea.checked = acc.emailAlerts !== false;
+          if (ma) ma.checked = acc.marketAlerts !== false;
+          if (rr) rr.checked = acc.renewalReminders !== false;
+          if (td) td.textContent = acc.tierBadge || 'No Tier';
+          if (rd) rd.textContent = acc.userRank || '-';
+          if (avatar) avatar.src = acc.avatarUrl || "{{ url_for('static', filename='vaultsignals-logo.png') }}";
+
+          fillCurrencyOptions(sessionData.currencies || [], sessionData.currency?.code || 'GBP');
+        }
+
+        function buildCommunityPayload() {
+          return {
+            displayName: (document.getElementById('settingsDisplayName')?.value || '').trim(),
+            bio: (document.getElementById('settingsBio')?.value || '').trim(),
+            privacyMode: document.getElementById('settingsPrivacyMode')?.value || 'public',
+            showOnLeaderboard: Boolean(document.getElementById('settingsLeaderboard')?.checked),
+            ignoreWhisper: Boolean(document.getElementById('settingsIgnoreWhisper')?.checked),
+            layoutPreset: document.getElementById('settingsLayoutPreset')?.value || 'default',
+            emailAlerts: Boolean(document.getElementById('settingsEmailAlerts')?.checked),
+            marketAlerts: Boolean(document.getElementById('settingsMarketAlerts')?.checked),
+            renewalReminders: Boolean(document.getElementById('settingsRenewalReminders')?.checked),
+            preferredBillingMethod: document.getElementById('settingsPreferredBillingMethod')?.value || 'paypal',
+          };
+        }
+
+        async function saveCommunity() {
+          return fetch('/api/community/settings', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(buildCommunityPayload()),
+          });
+        }
+
+        async function saveCurrencyPreference() {
+          const selected = document.getElementById('settingsCurrencyCode')?.value || '';
+          if (!selected) {
+            return { ok: true, message: 'Currency unchanged.' };
+          }
+          const res = await fetch('/api/preferences/currency', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ currencyCode: selected }),
+          });
+          return parseResponse(res);
+        }
+
+        form?.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          if (saveButton) {
+            saveButton.disabled = true;
+            saveButton.textContent = 'Saving...';
+          }
+          setMsg('Saving your settings...', false);
+
+          try {
+            const [communityRes, currencyData] = await Promise.all([
+              saveCommunity(),
+              saveCurrencyPreference(),
+            ]);
+            const communityData = await parseResponse(communityRes);
+            const success = communityRes.ok && currencyData.ok !== false;
+            const msg = success
+              ? 'All settings saved.'
+              : (communityData.message || currencyData.message || 'Unable to save all settings.');
+
+            setMsg(msg, success);
+            if (success) {
+              await loadSettings();
+            }
+          } catch (error) {
+            console.error('Settings save failed:', error);
+            setMsg('Failed to save settings. Please try again.', false);
+          } finally {
+            if (saveButton) {
+              saveButton.disabled = false;
+              saveButton.textContent = 'Save all settings';
+            }
+          }
+        });
+
+        await loadSettings();
+      })();
+    </script>
+  </body>
+</html>

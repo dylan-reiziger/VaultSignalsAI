@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VaultSignals</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='vaultsignals-logo.png') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body data-vat-rate="{{ ui_config.vat_rate }}" data-currency-symbol="{{ ui_config.currency_symbol }}" data-default-currency-code="{{ ui_config.default_currency_code }}">
+    <canvas id="marketCanvas"></canvas>
+    <div class="site-shell">
+      <div class="animated-bg">
+        <span class="glow glow-1"></span>
+        <span class="glow glow-2"></span>
+        <span class="glow glow-3"></span>
+        <div class="market-lines"></div>
+      </div>
+
+      <header class="navbar">
+        <div class="brand">
+          <div class="logo" aria-label="Vault Signals logo">
+            <img class="logo-img" src="{{ url_for('static', filename='vaultsignals-logo.png') }}" alt="Vault Signals logo" />
+          </div>
+          <div>
+            <p class="eyebrow">Premium Signals</p>
+            <h2 class="brand-title">VaultSignals</h2>
+          </div>
+        </div>
+
+        <nav class="nav-links" id="navLinks">
+          <a href="/">Home</a>
+          <a href="/price">Price</a>
+          <a class="hidden nav-active" data-member-portal-link href="/your-signals">Your Signals</a>
+          <a href="/about-us">About Us</a>
+          <a class="hidden" data-member-portal-link href="/account/dashboard#community-hub-section">Community</a>
+          <a class="hidden" data-member-portal-link href="/pro-mode" style="color:#a78bfa;font-weight:700;">⚡ Pro</a>
+          <a href="#feedback">Feedback</a>
+        </nav>
+
+        <div class="nav-actions">
+          <a class="bitvavo-btn" href="{{ ui_config.bitvavo_url }}" target="_blank" rel="noreferrer">Bitvavo</a>
+          <button class="ghost-btn nav-login-btn" data-login-trigger type="button">Log In</button>
+          <a href="/settings" class="nav-settings-btn" title="Settings" aria-label="Settings">⚙</a>
+          <button class="menu-btn" id="menuToggle" aria-label="Open menu">☰</button>
+        </div>
+      </header>
+
+      <main>
+        <section class="section member-hero visible">
+          <div class="section-heading member-hero-head">
+            <div>
+              <p class="eyebrow">Paid Signal Access</p>
+              <h2 id="signalsWelcome">{% if requires_login %}Log in to view the signals attached to your paid account.{% else %}Loading your paid signals for today.{% endif %}</h2>
+              <p class="section-copy">This page shows the tiers you paid for, the number of signals unlocked per day, and the active signals available in your selected display currency.</p>
+            </div>
+          </div>
+          <div class="member-summary-grid" id="signalsSummary"></div>
+        </section>
+
+        <section class="section visible">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Today</p>
+              <h2>Daily signal feed</h2>
+            </div>
+          </div>
+          <div id="signalsEmpty" class="panel-card member-empty-state">
+            <h3>No signals available yet</h3>
+            <p>Check back soon or upgrade your membership to access more signals.</p>
+          </div>
+          <div id="signalsFeed" class="member-signals-grid"></div>
+        </section>
+
+        <section class="section visible">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Upgrade Your Access</p>
+              <h2>Purchase signal tiers</h2>
+              <p class="section-copy">Unlock more signals per day by choosing a tier that works for you.</p>
+            </div>
+          </div>
+          <div id="purchaseTiers" class="member-signals-grid"></div>
+        </section>
+
+
+        <section class="section signals-feedback-section visible">
+          <div class="feedback-prompt-card">
+            <div class="feedback-prompt-text">
+              <h3>Share your signal feedback</h3>
+              <p>Let us know how today's signals performed. Your feedback shapes future signal quality.</p>
+            </div>
+            <button class="primary-btn" data-feedback-trigger type="button">Leave Feedback</button>
+          </div>
+        </section>
+        {% include 'sections/site_footer.html' %}
+      </main>
+    </div>
+
+    {% include 'auth_modal.html' %}
+    {% include 'feedback_modal.html' %}
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+  </body>
+</html>

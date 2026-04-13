@@ -1,0 +1,1312 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VaultSignals — Pro Mode</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='vaultsignals-logo.png') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body data-vat-rate="{{ ui_config.vat_rate }}" data-currency-symbol="{{ ui_config.currency_symbol }}" data-default-currency-code="{{ ui_config.default_currency_code }}" data-bitvavo-url="{{ ui_config.bitvavo_url }}" data-requires-login="{{ 'true' if requires_login else 'false' }}">
+    <canvas id="marketCanvas"></canvas>
+    <div class="site-shell">
+      <div class="animated-bg">
+        <span class="glow glow-1"></span>
+        <span class="glow glow-2"></span>
+        <span class="glow glow-3"></span>
+        <div class="market-lines"></div>
+      </div>
+
+      <header class="navbar">
+        <div class="brand">
+          <div class="logo" aria-label="Vault Signals logo">
+            <img class="logo-img" src="{{ url_for('static', filename='vaultsignals-logo.png') }}" alt="Vault Signals logo" />
+          </div>
+          <div>
+            <p class="eyebrow">Premium Signals</p>
+            <h2 class="brand-title">VaultSignals</h2>
+          </div>
+        </div>
+
+        <nav class="nav-links" id="navLinks">
+          <a href="/">Home</a>
+          <a href="/price">Price</a>
+          <a class="hidden" data-member-portal-link href="/your-signals">Your Signals</a>
+          <a href="/about-us">About Us</a>
+          <a class="hidden" data-member-portal-link href="/account/dashboard#community-hub-section">Community</a>
+          <a href="#feedback">Feedback</a>
+        </nav>
+
+        <div class="nav-actions">
+          <a class="bitvavo-btn" href="{{ ui_config.bitvavo_url }}" target="_blank" rel="noreferrer">Bitvavo</a>
+          <button class="ghost-btn nav-login-btn" data-login-trigger type="button">Log In</button>
+          <a href="/settings" class="nav-settings-btn" title="Settings" aria-label="Settings">⚙</a>
+          <button class="menu-btn" id="menuToggle" aria-label="Open menu">☰</button>
+        </div>
+      </header>
+
+      <main>
+        {% if requires_login %}
+        <section class="pro-login-guard-shell">
+          <div class="pro-signals-shell">
+            <div class="pro-login-guard-card">
+              <span class="pro-ai-badge-pill">Members Only</span>
+              <h1 class="pro-hero-title">Pro Crypto Desk</h1>
+              <p class="pro-hero-sub">Log in to open the advanced desk with the booking panel, live order book, TradingView chart, and top movers.</p>
+              <div class="pro-login-guard-actions">
+                <button class="primary-btn" data-login-trigger type="button">Log In To Open Pro Mode</button>
+                <a class="ghost-btn" href="/your-signals">Go to Your Signals</a>
+              </div>
+            </div>
+          </div>
+        </section>
+        {% else %}
+        <section class="pro-exchange-shell">
+          <div class="pro-signals-shell">
+            <div class="pro-exchange-grid">
+              <section class="pro-chart-column">
+                <div class="pro-panel-toolbar">
+                  <div class="pro-panel-menu">
+                    <button id="proPanelMenuToggle" class="pro-panel-menu-toggle" type="button" aria-expanded="false" aria-controls="proPanelMenu">Panels</button>
+                    <div id="proPanelMenu" class="pro-panel-menu-dropdown hidden">
+                      <label class="pro-panel-option" for="proPanelBookingToggle">
+                        <span>Booking panel</span>
+                        <input id="proPanelBookingToggle" data-pro-panel-toggle="booking" type="checkbox" checked />
+                      </label>
+                      <label class="pro-panel-option" for="proPanelOrderbookToggle">
+                        <span>Order book</span>
+                        <input id="proPanelOrderbookToggle" data-pro-panel-toggle="orderbook" type="checkbox" checked />
+                      </label>
+                      <label class="pro-panel-option" for="proPanelMoversToggle">
+                        <span>Top movers</span>
+                        <input id="proPanelMoversToggle" data-pro-panel-toggle="movers" type="checkbox" checked />
+                      </label>
+                    </div>
+                  </div>
+                  <div class="pro-live-indicator">
+                    <span id="proDeskLiveBadge" class="pro-live-pill is-idle">Connecting live API...</span>
+                    <span id="proDeskUpdatedAt" class="pro-live-time">Waiting for first update</span>
+                  </div>
+                </div>
+
+                <section class="pro-tradingview-panel">
+                  <div class="pro-exchange-panel-head pro-exchange-panel-head--compact">
+                    <div>
+                      <p class="eyebrow">Chart</p>
+                      <h2 id="proTradingViewTitle">TradingView</h2>
+                      <p class="section-copy" id="proTradingViewMeta">Keeping the chart in place while the booking and order book react to live signals.</p>
+                    </div>
+                    <div class="pro-chart-toolbar">
+                      <button type="button" class="pro-chart-interval is-active" data-pro-interval="60">1h</button>
+                      <button type="button" class="pro-chart-interval" data-pro-interval="240">4h</button>
+                      <button type="button" class="pro-chart-interval" data-pro-interval="1D">1d</button>
+                      <select class="pro-currency-select" data-currency-selector aria-label="Display currency"></select>
+                    </div>
+                  </div>
+
+                  <div class="pro-tradingview-stage">
+                    <div id="proTradingViewWidget" class="pro-tradingview-widget" aria-label="TradingView advanced chart"></div>
+                    <svg id="proLiveChartFallback" class="pro-live-chart pro-live-chart-fallback is-hidden" viewBox="0 0 760 360" preserveAspectRatio="none" role="img" aria-label="Fallback live crypto chart"></svg>
+                  </div>
+                </section>
+
+                <div class="pro-terminal-topbar">
+                  <div class="pro-terminal-pair-block">
+                    <span class="pro-terminal-label">Selected pair</span>
+                    <strong id="proDeskPair">Loading...</strong>
+                  </div>
+                  <div class="pro-terminal-stat">
+                    <span>Last price</span>
+                    <strong id="proDeskLastPrice">—</strong>
+                  </div>
+                  <div class="pro-terminal-stat">
+                    <span>24h change</span>
+                    <strong id="proDeskChange">—</strong>
+                  </div>
+                  <div class="pro-terminal-stat">
+                    <span>24h volume</span>
+                    <strong id="proDeskVolume">—</strong>
+                  </div>
+                  <div class="pro-terminal-engine">
+                    <span class="pro-terminal-label">Engine mode</span>
+                    <strong id="proDeskMode">Manual react</strong>
+                  </div>
+                </div>
+
+                <div class="pro-terminal-subbar">
+                  <div class="pro-market-chip-row" id="proMarketChips">
+                    <span class="pro-market-chip">Loading market cap...</span>
+                    <span class="pro-market-chip">Loading volume...</span>
+                    <span class="pro-market-chip">Loading breadth...</span>
+                  </div>
+                  <div class="pro-terminal-mini-stats">
+                    <span class="pro-terminal-mini-pill">Signals <strong id="statTotal">—</strong></span>
+                    <span class="pro-terminal-mini-pill is-buy">Auto buy <strong id="statBuys">—</strong></span>
+                    <span class="pro-terminal-mini-pill is-sell">Auto sell <strong id="statSells">—</strong></span>
+                    <span class="pro-terminal-mini-pill">Confidence <strong id="statAvgRR">—</strong></span>
+                    <span class="pro-terminal-mini-pill">State <strong id="statCurrency">—</strong></span>
+                  </div>
+                </div>
+              </section>
+
+              <div class="pro-side-stack">
+              <aside class="pro-booking-panel" data-pro-panel="booking">
+                <div class="pro-exchange-panel-head">
+                  <div>
+                    <p class="eyebrow">Signal Booking</p>
+                    <h2>Instant reaction</h2>
+                    <p class="section-copy">Signals flow into this booking panel so you can react yourself or arm the AI to route the action.</p>
+                  </div>
+                  <span class="pro-auto-pill" id="proAutoMode">Paper Auto</span>
+                </div>
+
+                <div class="pro-booking-tab-row" id="proOrderTypeTabs">
+                  <button type="button" class="pro-booking-tab is-active" data-pro-order-type="limit">Limit</button>
+                  <button type="button" class="pro-booking-tab" data-pro-order-type="market">Market</button>
+                  <button type="button" class="pro-booking-tab" data-pro-order-type="auto">AI Auto</button>
+                </div>
+
+                <div class="pro-booking-side-row">
+                  <button type="button" class="pro-booking-side-btn is-buy is-active" id="proBookingBuy" data-pro-side="BUY">Buy</button>
+                  <button type="button" class="pro-booking-side-btn is-sell" id="proBookingSell" data-pro-side="SELL">Sell</button>
+                </div>
+
+                <div class="pro-booking-field-grid">
+                  <label>
+                    <span>Limit price</span>
+                    <input id="proBookingEntry" type="text" inputmode="decimal" />
+                  </label>
+                  <label>
+                    <span>Amount <span id="proBookingAmountSymbol">COIN</span></span>
+                    <input id="proBookingSize" type="number" min="0" step="0.0001" />
+                  </label>
+                  <label>
+                    <span>Total</span>
+                    <input id="proBookingTotal" type="text" readonly />
+                  </label>
+                  <label>
+                    <span>Signal mode</span>
+                    <input id="proBookingSignalMode" type="text" readonly />
+                  </label>
+                </div>
+
+                <div class="pro-booking-metric-grid">
+                  <article class="pro-booking-metric">
+                    <span>Target</span>
+                    <strong id="proBookingTarget">—</strong>
+                  </article>
+                  <article class="pro-booking-metric">
+                    <span>Stop</span>
+                    <strong id="proBookingStop">—</strong>
+                  </article>
+                  <article class="pro-booking-metric">
+                    <span>AI confidence</span>
+                    <strong id="proBookingConfidence">—</strong>
+                  </article>
+                  <article class="pro-booking-metric">
+                    <span>Queued actions</span>
+                    <strong id="proAutoExecutionCount">—</strong>
+                  </article>
+                </div>
+
+                <div class="pro-booking-actions">
+                  <a id="proBookingReactNow" class="pro-booking-cta pro-booking-cta--manual" href="{{ ui_config.bitvavo_url }}" target="_blank" rel="noreferrer">React on Bitvavo</a>
+                  <button id="proBookingAiRoute" class="pro-booking-cta pro-booking-cta--auto" type="button">Let AI route</button>
+                </div>
+
+                <div class="pro-booking-status-card">
+                  <span class="pro-market-kicker">Live queue</span>
+                  <strong id="proAutoQueueTitle">Automatic market actions</strong>
+                  <p id="proBookingModeCopy">Manual reaction from live signal booking.</p>
+                </div>
+
+                <div class="pro-signal-tape-panel">
+                  <div class="pro-exchange-panel-head pro-exchange-panel-head--compact">
+                    <div>
+                      <p class="eyebrow">Signal Tape</p>
+                      <h3>Incoming signals</h3>
+                    </div>
+                  </div>
+                  <div class="pro-signal-tape-list" id="proSignalTape">
+                    <div class="pro-loading-state pro-loading-state--compact">
+                      <div class="pro-spinner"></div>
+                      <p>Loading signal tape...</p>
+                    </div>
+                  </div>
+                </div>
+              </aside>
+
+              <section class="pro-orderbook-panel" data-pro-panel="orderbook">
+                <div class="pro-exchange-panel-head pro-exchange-panel-head--compact">
+                  <div>
+                    <p class="eyebrow">Order Book</p>
+                    <h2 id="proOrderBookPair">Loading pair...</h2>
+                  </div>
+                </div>
+
+                <div class="pro-orderbook-columns">
+                  <span>Price</span>
+                  <span id="proOrderBookAmountLabel">Amount</span>
+                  <span id="proOrderBookTotalLabel">Total</span>
+                </div>
+
+                <div class="pro-orderbook-list pro-orderbook-list--asks" id="proOrderBookAsks">
+                  <div class="pro-loading-state pro-loading-state--compact">
+                    <div class="pro-spinner"></div>
+                    <p>Building ask ladder...</p>
+                  </div>
+                </div>
+
+                <div class="pro-orderbook-mid">
+                  <strong id="proOrderBookMidPrice">—</strong>
+                  <span id="proOrderBookSpread">Spread —</span>
+                </div>
+
+                <div class="pro-orderbook-list pro-orderbook-list--bids" id="proOrderBookBids">
+                  <div class="pro-loading-state pro-loading-state--compact">
+                    <div class="pro-spinner"></div>
+                    <p>Building bid ladder...</p>
+                  </div>
+                </div>
+              </section>
+              <section class="pro-top-movers-panel" data-pro-panel="movers">
+                <div class="pro-exchange-panel-head pro-exchange-panel-head--compact">
+                  <div>
+                    <p class="eyebrow">Top Movers</p>
+                    <h2>Keep this on</h2>
+                    <p class="section-copy">The biggest movers stay pinned here while the booking and chart update above.</p>
+                  </div>
+                </div>
+
+                <div class="pro-top-movers-list" id="proTopMovers">
+                  <div class="pro-loading-state pro-loading-state--compact">
+                    <div class="pro-spinner"></div>
+                    <p>Loading top movers...</p>
+                  </div>
+                </div>
+              </section>
+              </div>
+            </div>
+          </div>
+        </section>
+        {% endif %}
+        {% include 'sections/site_footer.html' %}
+      </main>
+    </div>
+
+    {% include 'auth_modal.html' %}
+    {% include 'feedback_modal.html' %}
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <script>
+      /* Pro exchange desk */
+
+      const bitvavo_url = document.body.dataset.bitvavoUrl || 'https://bitvavo.com/en';
+      const proRequiresLogin = document.body.dataset.requiresLogin === 'true';
+      const proState = {
+        signals: [],
+        displayCurrency: document.body.dataset.defaultCurrencyCode || 'GBP',
+        liveDesk: null,
+        marketSummary: null,
+        autoQueue: [],
+        eventSource: null,
+        streamKey: '',
+        streamConnected: false,
+        executionMode: 'manual',
+        orderType: 'limit',
+        manualSide: null,
+        chartInterval: '60',
+        tradingViewScriptPromise: null,
+        tradingViewKey: '',
+        signalPollTimer: null,
+        marketRefreshTimer: null,
+        lastTickAt: 0,
+        lastDeskRefreshAt: 0,
+        orderBookSeed: Date.now(),
+      };
+
+      function proFormatNumber(value, decimals = 2) {
+        const numericValue = Number(value);
+        if (!Number.isFinite(numericValue)) return '0';
+        return numericValue.toLocaleString('en-GB', {
+          minimumFractionDigits: decimals,
+          maximumFractionDigits: decimals,
+        });
+      }
+
+      function proFormatAmount(value) {
+        const numericValue = Number(value);
+        if (!Number.isFinite(numericValue)) return '0';
+        if (numericValue >= 1000) return proFormatNumber(numericValue, 2);
+        if (numericValue >= 1) return proFormatNumber(numericValue, 4);
+        return proFormatNumber(numericValue, 6);
+      }
+
+      function proCompactUsd(value) {
+        const numericValue = Number(value) || 0;
+        if (numericValue >= 1_000_000_000_000) return `$${proFormatNumber(numericValue / 1_000_000_000_000, 2)}T`;
+        if (numericValue >= 1_000_000_000) return `$${proFormatNumber(numericValue / 1_000_000_000, 2)}B`;
+        if (numericValue >= 1_000_000) return `$${proFormatNumber(numericValue / 1_000_000, 2)}M`;
+        if (numericValue >= 1_000) return `$${proFormatNumber(numericValue / 1_000, 2)}K`;
+        if (numericValue >= 1) return `$${proFormatNumber(numericValue, 2)}`;
+        return `$${proFormatNumber(numericValue, 4)}`;
+      }
+
+      function proPriceLabel(value) {
+        const numericValue = Number(value) || 0;
+        if (numericValue >= 1000) return `$${proFormatNumber(numericValue, 0)}`;
+        if (numericValue >= 1) return `$${proFormatNumber(numericValue, 2)}`;
+        return `$${proFormatNumber(numericValue, 4)}`;
+      }
+
+      function proFmtPrice(value, currency) {
+        const numericValue = Number(value);
+        if (!Number.isFinite(numericValue)) return '-';
+        try {
+          return new Intl.NumberFormat('en-GB', {
+            style: 'currency',
+            currency,
+            minimumFractionDigits: numericValue < 1 ? 4 : 2,
+            maximumFractionDigits: numericValue < 1 ? 6 : 2,
+          }).format(numericValue);
+        } catch (_) {
+          return numericValue.toFixed(numericValue < 1 ? 4 : 2);
+        }
+      }
+
+      function proSignedPercent(value) {
+        const numericValue = Number(value) || 0;
+        return `${numericValue >= 0 ? '+' : ''}${proFormatNumber(numericValue, 2)}%`;
+      }
+
+      function proFormatSnapshotTime(value) {
+        if (!value) {
+          return 'Waiting for first update';
+        }
+        return `${new Date(value).toLocaleTimeString('en-GB', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false,
+          timeZone: 'UTC',
+        })} UTC`;
+      }
+
+      function proDefaultOrderSize(price) {
+        const numericPrice = Number(price) || 0;
+        if (numericPrice >= 50000) return '0.0100';
+        if (numericPrice >= 5000) return '0.0500';
+        if (numericPrice >= 500) return '0.5000';
+        if (numericPrice >= 50) return '5.0000';
+        if (numericPrice >= 1) return '50.0000';
+        return '250.0000';
+      }
+
+      function proNormalizeChartPoints(points, maxPoints = 120) {
+        const cutoff = Date.now() - (24 * 60 * 60 * 1000);
+        const filtered = (Array.isArray(points) ? points : [])
+          .map((point) => ({ timestamp: Number(point.timestamp), price: Number(point.price) }))
+          .filter((point) => Number.isFinite(point.timestamp) && Number.isFinite(point.price) && point.timestamp >= cutoff)
+          .sort((left, right) => left.timestamp - right.timestamp);
+
+        if (filtered.length <= maxPoints) return filtered;
+
+        const step = Math.ceil(filtered.length / maxPoints);
+        const sampled = filtered.filter((_, index) => index % step === 0);
+        const lastPoint = filtered[filtered.length - 1];
+        if (sampled[sampled.length - 1]?.timestamp !== lastPoint.timestamp) {
+          sampled.push(lastPoint);
+        }
+        return sampled;
+      }
+
+      function proFetchFresh(url, options = {}) {
+        return fetch(url, {
+          ...options,
+          cache: options.cache ?? 'no-store',
+        });
+      }
+
+      function proBuildFallbackChart(price, changePct, pointCount = 40) {
+        const endPrice = Number(price) || 0;
+        if (!Number.isFinite(endPrice) || endPrice <= 0) {
+          return [];
+        }
+
+        const normalizedChange = Number(changePct || 0) / 100;
+        const startPrice = normalizedChange <= -0.99 ? endPrice : (endPrice / Math.max(0.01, 1 + normalizedChange));
+        const now = Date.now();
+        const stepMs = (24 * 60 * 60 * 1000) / Math.max(1, pointCount - 1);
+
+        return Array.from({ length: pointCount }, (_, index) => {
+          const progress = index / Math.max(1, pointCount - 1);
+          const swing = Math.sin(progress * Math.PI * 2.4) * endPrice * 0.006;
+          const drift = (endPrice - startPrice) * progress;
+          return {
+            timestamp: Math.round(now - ((pointCount - 1 - index) * stepMs)),
+            price: Math.max(0.0001, startPrice + drift + swing),
+          };
+        });
+      }
+
+      function proBuildLiveDeskFallback(marketPayload, requestedCoinId = '') {
+        const normalizedCoinId = String(requestedCoinId || '').trim().toLowerCase();
+        const topCoins = (Array.isArray(marketPayload?.crypto) ? marketPayload.crypto : []).map((coin) => ({
+          ...coin,
+          high_24h: Number(coin.high_24h || coin.price || 0),
+          low_24h: Number(coin.low_24h || coin.price || 0),
+        }));
+        const selectedCoin = topCoins.find((coin) => String(coin.id || '').trim().toLowerCase() === normalizedCoinId) || topCoins[0] || null;
+
+        return {
+          ok: true,
+          topCoins,
+          selectedCoin,
+          selectedCoinId: selectedCoin?.id || '',
+          chart: proBuildFallbackChart(selectedCoin?.price, selectedCoin?.change),
+          source: {
+            provider: 'Market summary fallback',
+            apiKeyConfigured: false,
+            fallback: true,
+            windowHours: 24,
+          },
+        };
+      }
+
+      function proBuildChartPaths(points, width = 760, height = 360, padding = 24) {
+        const prices = points.map((point) => point.price);
+        const minPrice = Math.min(...prices);
+        const maxPrice = Math.max(...prices);
+        const range = Math.max(maxPrice - minPrice, maxPrice * 0.003, 1);
+
+        const mappedPoints = points.map((point, index) => {
+          const x = padding + (index / Math.max(1, points.length - 1)) * (width - (padding * 2));
+          const y = height - padding - (((point.price - minPrice) / range) * (height - (padding * 2)));
+          return { x, y, price: point.price, timestamp: point.timestamp };
+        });
+
+        const linePath = mappedPoints
+          .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+          .join(' ');
+        const areaPath = `${linePath} L ${mappedPoints[mappedPoints.length - 1].x.toFixed(2)} ${(height - padding).toFixed(2)} L ${mappedPoints[0].x.toFixed(2)} ${(height - padding).toFixed(2)} Z`;
+        return { mappedPoints, linePath, areaPath };
+      }
+
+      function proRenderSvgChart(elementId, points, selectedCoin) {
+        const chart = document.getElementById(elementId);
+        if (!chart) return;
+
+        const normalizedPoints = proNormalizeChartPoints(points);
+        if (normalizedPoints.length < 2) {
+          chart.innerHTML = '<text x="50%" y="50%" text-anchor="middle" fill="rgba(255,255,255,0.58)" font-size="16">Chart unavailable</text>';
+          return;
+        }
+
+        const positive = Number(selectedCoin?.change || 0) >= 0;
+        const strokeColor = positive ? '#26d07c' : '#ff6b6b';
+        const fillFrom = positive ? 'rgba(38,208,124,0.24)' : 'rgba(255,107,107,0.24)';
+        const fillTo = positive ? 'rgba(38,208,124,0.02)' : 'rgba(255,107,107,0.02)';
+        const { mappedPoints, linePath, areaPath } = proBuildChartPaths(normalizedPoints);
+        const lastPoint = mappedPoints[mappedPoints.length - 1];
+        const firstLabel = new Date(normalizedPoints[0].timestamp).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+        const lastLabel = new Date(normalizedPoints[normalizedPoints.length - 1].timestamp).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+        const gridLines = [0.18, 0.38, 0.58, 0.78]
+          .map((ratio) => `<line x1="24" y1="${(360 * ratio).toFixed(2)}" x2="736" y2="${(360 * ratio).toFixed(2)}" stroke="rgba(255,255,255,0.07)" stroke-width="1" stroke-dasharray="4 8"></line>`)
+          .join('');
+
+        chart.innerHTML = `
+          <defs>
+            <linearGradient id="proFallbackFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="${fillFrom}" />
+              <stop offset="100%" stop-color="${fillTo}" />
+            </linearGradient>
+          </defs>
+          ${gridLines}
+          <path d="${areaPath}" fill="url(#proFallbackFill)"></path>
+          <path d="${linePath}" fill="none" stroke="${strokeColor}" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"></path>
+          <circle cx="${lastPoint.x.toFixed(2)}" cy="${lastPoint.y.toFixed(2)}" r="5" fill="${strokeColor}" stroke="rgba(10,10,10,0.88)" stroke-width="2"></circle>
+          <text x="24" y="342" fill="rgba(255,255,255,0.46)" font-size="12">${firstLabel}</text>
+          <text x="670" y="342" fill="rgba(255,255,255,0.46)" font-size="12">${lastLabel}</text>
+        `;
+      }
+
+      function proGetCoinBySymbol(symbol) {
+        const normalizedSymbol = String(symbol || '').trim().toUpperCase();
+        return (proState.liveDesk?.topCoins || []).find((coin) => String(coin.symbol || '').trim().toUpperCase() === normalizedSymbol) || null;
+      }
+
+      function proGetSelectedSignal() {
+        const selectedSymbol = String(proState.liveDesk?.selectedCoin?.symbol || '').trim().toUpperCase();
+        return proState.signals.find((signal) => String(signal.assetSymbol || '').trim().toUpperCase() === selectedSymbol)
+          || proState.signals.reduce((best, signal) => (!best || signal.aiConfidence > best.aiConfidence ? signal : best), null)
+          || null;
+      }
+
+      function proGetActiveSide() {
+        const selectedSignal = proGetSelectedSignal();
+        return proState.manualSide || selectedSignal?.aiAction || 'BUY';
+      }
+
+      function proBuildAutoQueue(signals, topCoins) {
+        const signalMap = new Map(signals.map((signal) => [String(signal.assetSymbol || '').toUpperCase(), signal]));
+
+        return topCoins.slice(0, 10).map((coin) => {
+          const symbol = String(coin.symbol || '').toUpperCase();
+          const signal = signalMap.get(symbol);
+          const change = Number(coin.change || 0);
+
+          if (signal) {
+            const confidence = Math.min(97, Math.round((Number(signal.aiConfidence || 0) * 0.84) + Math.min(12, Math.abs(change) * 2.1)));
+            return {
+              id: coin.id,
+              symbol,
+              name: coin.name,
+              action: signal.aiAction,
+              badge: signal.aiAction === 'BUY' ? 'AUTO BUY' : 'AUTO SELL',
+              confidence,
+              source: 'Signal + market',
+              trigger: signal.sessionLabel || 'Signal board',
+              risk: signal.riskReward >= 2 ? 'Controlled' : 'Elevated',
+              reason: signal.aiInsight,
+            };
+          }
+
+          if (change >= 2.75) {
+            const confidence = Math.min(84, 60 + Math.round(Math.abs(change) * 3));
+            return {
+              id: coin.id,
+              symbol,
+              name: coin.name,
+              action: 'BUY',
+              badge: 'AUTO BUY',
+              confidence,
+              source: 'Live desk',
+              trigger: 'Momentum breakout',
+              risk: Math.abs(change) > 6 ? 'High' : 'Medium',
+              reason: `${coin.name} is printing ${proSignedPercent(change)} over 24H with strong market-cap support.`,
+            };
+          }
+
+          if (change <= -2.75) {
+            const confidence = Math.min(84, 60 + Math.round(Math.abs(change) * 3));
+            return {
+              id: coin.id,
+              symbol,
+              name: coin.name,
+              action: 'SELL',
+              badge: 'AUTO SELL',
+              confidence,
+              source: 'Live desk',
+              trigger: 'Pressure breakdown',
+              risk: Math.abs(change) > 6 ? 'High' : 'Medium',
+              reason: `${coin.name} is under sell pressure at ${proSignedPercent(change)} over 24H with structure rolling lower.`,
+            };
+          }
+
+          return {
+            id: coin.id,
+            symbol,
+            name: coin.name,
+            action: 'WAIT',
+            badge: 'MONITOR',
+            confidence: 54,
+            source: 'Watchlist',
+            trigger: 'No clean trigger',
+            risk: 'Low',
+            reason: `${coin.name} is inside a neutral market range. Keep the asset on watch until direction expands.`,
+          };
+        }).sort((left, right) => {
+          const leftPassive = left.action === 'WAIT' ? 1 : 0;
+          const rightPassive = right.action === 'WAIT' ? 1 : 0;
+          if (leftPassive !== rightPassive) return leftPassive - rightPassive;
+          return right.confidence - left.confidence;
+        });
+      }
+
+      function proBuildOrderBook(selectedCoin, signal) {
+        const lastPrice = Number(signal?.entryPrice || selectedCoin?.price || 0.0001);
+        const safePrice = Math.max(lastPrice, 0.0001);
+        const symbol = String(selectedCoin?.symbol || signal?.assetSymbol || 'COIN').toUpperCase();
+        const change = Number(selectedCoin?.change || 0);
+        const volume = Number(selectedCoin?.volume || 0);
+        const marketCap = Number(selectedCoin?.market_cap || 0);
+        const pulse = (Number(proState.orderBookSeed || Date.now()) % 9973) / 9973;
+        const liquidityFactor = volume > 0 && marketCap > 0
+          ? Math.max(1, Math.min(4.5, volume / Math.max(marketCap * 0.00014, 1)))
+          : 1.2;
+        const imbalance = Math.max(-0.65, Math.min(0.65, change / 8));
+        const baseStep = Math.max(safePrice * 0.00045, safePrice >= 1000 ? 3 : safePrice >= 10 ? 0.08 : 0.0025);
+        const priceStep = Math.max(baseStep, baseStep * (0.95 + Math.abs(imbalance) + (pulse * 0.55)));
+        const amountBase = Math.max(0.0025, Math.min(950, (380 / Math.max(safePrice, 0.75)) * liquidityFactor));
+
+        const asks = [];
+        const bids = [];
+        let askRunningTotal = 0;
+        let bidRunningTotal = 0;
+        let askRunningAmount = 0;
+        let bidRunningAmount = 0;
+
+        for (let level = 6; level >= 1; level -= 1) {
+          const askPrice = safePrice + (priceStep * level);
+          const ladderWeight = 1 + ((7 - level) * 0.34);
+          const wave = 1 + (Math.sin((pulse + (level * 0.37)) * Math.PI * 2) * 0.18);
+          const askAmount = amountBase * ladderWeight * wave * (1 + Math.max(0, -imbalance));
+          askRunningTotal += askPrice * askAmount;
+          askRunningAmount += askAmount;
+          asks.push({ price: askPrice, amount: askAmount, total: askRunningTotal, cumulativeAmount: askRunningAmount, symbol });
+        }
+
+        for (let level = 1; level <= 6; level += 1) {
+          const bidPrice = Math.max(0, safePrice - (priceStep * level));
+          const ladderWeight = 1 + (level * 0.38);
+          const wave = 1 + (Math.cos((pulse + (level * 0.43)) * Math.PI * 2) * 0.18);
+          const bidAmount = amountBase * ladderWeight * wave * (1 + Math.max(0, imbalance));
+          bidRunningTotal += bidPrice * bidAmount;
+          bidRunningAmount += bidAmount;
+          bids.push({ price: bidPrice, amount: bidAmount, total: bidRunningTotal, cumulativeAmount: bidRunningAmount, symbol });
+        }
+
+        const maxTotal = Math.max(...asks.map((row) => row.total), ...bids.map((row) => row.total), 1);
+        asks.forEach((row) => { row.width = Math.max(6, Math.min(100, (row.total / maxTotal) * 100)); });
+        bids.forEach((row) => { row.width = Math.max(6, Math.min(100, (row.total / maxTotal) * 100)); });
+
+        return {
+          asks,
+          bids,
+          spreadPct: ((priceStep / Math.max(safePrice, 1)) * 100).toFixed(2),
+          lastPrice: safePrice,
+          symbol,
+        };
+      }
+
+      function proSetPanelVisibility(panelName, isVisible) {
+        const panel = document.querySelector(`[data-pro-panel="${panelName}"]`);
+        if (!panel) {
+          return;
+        }
+        panel.classList.toggle('pro-panel-hidden', !isVisible);
+      }
+
+      function proClosePanelMenu() {
+        const menu = document.getElementById('proPanelMenu');
+        const toggle = document.getElementById('proPanelMenuToggle');
+        if (!menu || !toggle) {
+          return;
+        }
+        menu.classList.add('hidden');
+        toggle.setAttribute('aria-expanded', 'false');
+      }
+
+      function proWirePanelMenu() {
+        const menu = document.getElementById('proPanelMenu');
+        const toggle = document.getElementById('proPanelMenuToggle');
+        if (!menu || !toggle) {
+          return;
+        }
+
+        menu.querySelectorAll('[data-pro-panel-toggle]').forEach((input) => {
+          const panelName = input.dataset.proPanelToggle || '';
+          proSetPanelVisibility(panelName, input.checked);
+          input.addEventListener('change', () => {
+            proSetPanelVisibility(panelName, input.checked);
+          });
+        });
+
+        toggle.addEventListener('click', (event) => {
+          event.stopPropagation();
+          const willOpen = menu.classList.contains('hidden');
+          menu.classList.toggle('hidden', !willOpen);
+          toggle.setAttribute('aria-expanded', String(willOpen));
+        });
+
+        document.addEventListener('click', (event) => {
+          if (menu.classList.contains('hidden')) {
+            return;
+          }
+          if (menu.contains(event.target) || toggle.contains(event.target)) {
+            return;
+          }
+          proClosePanelMenu();
+        });
+      }
+
+      function proRenderDeskHeader() {
+        const selectedCoin = proState.liveDesk?.selectedCoin || null;
+        const summary = proState.marketSummary || {
+          market_cap: (proState.liveDesk?.topCoins || []).reduce((total, coin) => total + Number(coin.market_cap || 0), 0),
+          volume_24h: (proState.liveDesk?.topCoins || []).reduce((total, coin) => total + Number(coin.volume || 0), 0),
+          btc_dominance: 0,
+        };
+        const actionable = proState.autoQueue.filter((item) => item.action !== 'WAIT');
+        const positiveCount = (proState.liveDesk?.topCoins || []).filter((coin) => Number(coin.change || 0) >= 0).length;
+        const topAction = proState.autoQueue[0] || null;
+
+        document.getElementById('proDeskPair').textContent = selectedCoin ? `${String(selectedCoin.symbol || '').toUpperCase()} / ${proState.displayCurrency}` : 'Waiting for market';
+        document.getElementById('proDeskLastPrice').textContent = selectedCoin ? proFmtPrice(selectedCoin.price, proState.displayCurrency) : '-';
+
+        const changeEl = document.getElementById('proDeskChange');
+        changeEl.textContent = selectedCoin ? proSignedPercent(selectedCoin.change || 0) : '-';
+        changeEl.className = `pro-terminal-price-change ${Number(selectedCoin?.change || 0) >= 0 ? 'is-up' : 'is-down'}`;
+
+        document.getElementById('proDeskVolume').textContent = selectedCoin ? proCompactUsd(selectedCoin.volume) : '-';
+        document.getElementById('proDeskMode').textContent = proState.executionMode === 'auto' ? 'AI auto armed' : 'Manual react';
+
+        document.getElementById('statTotal').textContent = proState.signals.length || '-';
+        document.getElementById('statBuys').textContent = proState.autoQueue.filter((item) => item.action === 'BUY').length;
+        document.getElementById('statSells').textContent = proState.autoQueue.filter((item) => item.action === 'SELL').length;
+        document.getElementById('statAvgRR').textContent = actionable.length
+          ? `${Math.round(actionable.reduce((sum, item) => sum + item.confidence, 0) / actionable.length)}%`
+          : '0%';
+        document.getElementById('statCurrency').textContent = proState.streamConnected ? 'Desk live' : 'Desk idle';
+        document.getElementById('proAutoMode').textContent = proState.executionMode === 'auto' ? 'AI routing armed' : 'Paper Auto';
+
+        const liveBadge = document.getElementById('proDeskLiveBadge');
+        if (liveBadge) {
+          liveBadge.textContent = proState.streamConnected ? 'Live API stream active' : 'Live API reconnecting';
+          liveBadge.classList.toggle('is-live', proState.streamConnected);
+          liveBadge.classList.toggle('is-idle', !proState.streamConnected);
+        }
+
+        const updatedAt = document.getElementById('proDeskUpdatedAt');
+        if (updatedAt) {
+          const sourceLabel = proState.liveDesk?.source?.provider || 'Market feed';
+          const snapshotAt = proState.lastTickAt || proState.lastDeskRefreshAt;
+          updatedAt.textContent = snapshotAt
+            ? `${sourceLabel} update ${proFormatSnapshotTime(snapshotAt)}`
+            : 'Waiting for first update';
+        }
+
+        const chipRow = document.getElementById('proMarketChips');
+        if (chipRow) {
+          chipRow.innerHTML = `
+            <span class="pro-market-chip">Total mcap ${proCompactUsd(summary.market_cap)}</span>
+            <span class="pro-market-chip">24H vol ${proCompactUsd(summary.volume_24h)}</span>
+            <span class="pro-market-chip">Breadth ${positiveCount}/${(proState.liveDesk?.topCoins || []).length || 0} green</span>
+            <span class="pro-market-chip">Top action ${topAction ? `${topAction.symbol} ${topAction.badge}` : 'Waiting'}</span>
+          `;
+        }
+
+        document.getElementById('proTradingViewTitle').textContent = selectedCoin
+          ? `${selectedCoin.name} chart`
+          : 'TradingView';
+        document.getElementById('proTradingViewMeta').textContent = selectedCoin
+          ? `${String(selectedCoin.symbol || '').toUpperCase()} stays connected to the live desk while signals stream into the booking panel.`
+          : 'Keeping the chart in place while the booking and order book react to live signals.';
+      }
+
+      function proUpdateBookingTotal() {
+        const entry = Number(document.getElementById('proBookingEntry')?.value || 0);
+        const size = Number(document.getElementById('proBookingSize')?.value || 0);
+        const total = entry * size;
+        const totalInput = document.getElementById('proBookingTotal');
+        if (totalInput) {
+          totalInput.value = Number.isFinite(total) && total > 0 ? proFmtPrice(total, proState.displayCurrency) : '-';
+        }
+      }
+
+      function proRenderBookingPanel() {
+        const selectedCoin = proState.liveDesk?.selectedCoin || null;
+        const selectedSignal = proGetSelectedSignal();
+        const activeSide = proGetActiveSide();
+        const orderTypeLabel = proState.orderType === 'auto' ? 'AI auto' : proState.orderType;
+        const reactButton = document.getElementById('proBookingReactNow');
+        const aiButton = document.getElementById('proBookingAiRoute');
+        const entryInput = document.getElementById('proBookingEntry');
+        const sizeInput = document.getElementById('proBookingSize');
+        const amountSymbol = document.getElementById('proBookingAmountSymbol');
+
+        document.getElementById('proBookingBuy').classList.toggle('is-active', activeSide === 'BUY');
+        document.getElementById('proBookingSell').classList.toggle('is-active', activeSide === 'SELL');
+        document.querySelectorAll('[data-pro-order-type]').forEach((button) => {
+          button.classList.toggle('is-active', button.dataset.proOrderType === proState.orderType);
+        });
+
+        if (amountSymbol) {
+          amountSymbol.textContent = String(selectedCoin?.symbol || selectedSignal?.assetSymbol || 'COIN').toUpperCase();
+        }
+
+        if (entryInput) {
+          entryInput.value = selectedSignal ? Number(selectedSignal.entryPrice || 0).toFixed(Number(selectedSignal.entryPrice || 0) < 1 ? 4 : 2) : (selectedCoin ? Number(selectedCoin.price || 0).toFixed(Number(selectedCoin.price || 0) < 1 ? 4 : 2) : '');
+        }
+        if (sizeInput && !sizeInput.value) {
+          sizeInput.value = proDefaultOrderSize(selectedSignal?.entryPrice || selectedCoin?.price || 0);
+        }
+
+        document.getElementById('proBookingSignalMode').value = selectedSignal
+          ? `${selectedSignal.aiAction} ${selectedSignal.aiConfidence}%`
+          : 'Waiting';
+        document.getElementById('proBookingTarget').textContent = selectedSignal ? proFmtPrice(selectedSignal.targetPrice, proState.displayCurrency) : '-';
+        document.getElementById('proBookingStop').textContent = selectedSignal ? proFmtPrice(selectedSignal.stopPrice, proState.displayCurrency) : '-';
+        document.getElementById('proBookingConfidence').textContent = selectedSignal ? `${selectedSignal.aiConfidence}%` : '-';
+        document.getElementById('proAutoExecutionCount').textContent = proState.autoQueue.filter((item) => item.action !== 'WAIT').length || 0;
+        document.getElementById('proAutoQueueTitle').textContent = selectedSignal
+          ? `${selectedSignal.assetSymbol} ${selectedSignal.aiAction} ready`
+          : 'Automatic market actions';
+        document.getElementById('proBookingModeCopy').textContent = proState.executionMode === 'auto'
+          ? 'AI routing is armed. The strongest queued setup will stay on top while you monitor the chart.'
+          : 'Manual reaction is active. Use the live signal tape or click a mover to update the booking panel.';
+
+        if (reactButton) {
+          reactButton.textContent = selectedSignal
+            ? `React ${selectedSignal.aiAction} on Bitvavo`
+            : 'React on Bitvavo';
+          reactButton.href = bitvavo_url;
+        }
+        if (aiButton) {
+          aiButton.textContent = proState.executionMode === 'auto' ? 'Return to manual react' : 'Let AI route';
+          aiButton.classList.toggle('is-armed', proState.executionMode === 'auto');
+        }
+
+        const tape = document.getElementById('proSignalTape');
+        if (tape) {
+          if (!proState.signals.length) {
+            tape.innerHTML = '<p class="pro-empty">No live signals available.</p>';
+          } else {
+            const selectedSymbol = String(selectedCoin?.symbol || '').toUpperCase();
+            tape.innerHTML = proState.signals.slice(0, 6).map((signal) => {
+              const signalSymbol = String(signal.assetSymbol || '').toUpperCase();
+              return `
+                <button class="pro-signal-tape-item ${signalSymbol === selectedSymbol ? 'is-active' : ''}" type="button" data-pro-signal-symbol="${signalSymbol}">
+                  <span class="pro-signal-tape-top">
+                    <span class="pro-signal-tape-symbol">${signalSymbol}</span>
+                    <span class="pro-signal-tape-action is-${String(signal.aiAction || '').toLowerCase()}">${signal.aiAction}</span>
+                  </span>
+                  <span class="pro-signal-tape-copy">${signal.sessionLabel} · ${signal.aiConfidence}% confidence</span>
+                  <span class="pro-signal-tape-prices">Entry ${proFmtPrice(signal.entryPrice, proState.displayCurrency)} · Target ${proFmtPrice(signal.targetPrice, proState.displayCurrency)}</span>
+                </button>
+              `;
+            }).join('');
+          }
+        }
+
+        proUpdateBookingTotal();
+      }
+
+      function proRenderOrderBook() {
+        const selectedCoin = proState.liveDesk?.selectedCoin || null;
+        const selectedSignal = proGetSelectedSignal();
+        const book = proBuildOrderBook(selectedCoin, selectedSignal);
+
+        document.getElementById('proOrderBookPair').textContent = `${book.symbol}/${proState.displayCurrency}`;
+        document.getElementById('proOrderBookAmountLabel').textContent = `Amount (${book.symbol})`;
+        document.getElementById('proOrderBookTotalLabel').textContent = `Total (${book.symbol})`;
+        document.getElementById('proOrderBookMidPrice').textContent = proFmtPrice(book.lastPrice, proState.displayCurrency);
+        document.getElementById('proOrderBookSpread').textContent = `Spread ${book.spreadPct}%`;
+
+        const renderRow = (row, side) => `
+          <div class="pro-orderbook-row is-${side}">
+            <span class="pro-orderbook-bar" style="width:${row.width}%"></span>
+            <span class="pro-orderbook-price">${proFmtPrice(row.price, proState.displayCurrency)}</span>
+            <span class="pro-orderbook-amount">${proFormatAmount(row.amount)}</span>
+            <span class="pro-orderbook-total">${proFormatAmount(row.cumulativeAmount)}</span>
+          </div>
+        `;
+
+        document.getElementById('proOrderBookAsks').innerHTML = book.asks.map((row) => renderRow(row, 'ask')).join('');
+        document.getElementById('proOrderBookBids').innerHTML = book.bids.map((row) => renderRow(row, 'bid')).join('');
+      }
+
+      function proRenderTopMovers() {
+        const movers = [...(proState.liveDesk?.topCoins || [])]
+          .sort((left, right) => Math.abs(Number(right.change || 0)) - Math.abs(Number(left.change || 0)))
+          .slice(0, 8);
+        const selectedCoinId = proState.liveDesk?.selectedCoinId || '';
+        const container = document.getElementById('proTopMovers');
+        if (!container) return;
+
+        if (!movers.length) {
+          container.innerHTML = '<p class="pro-empty">No movers available.</p>';
+          return;
+        }
+
+        container.innerHTML = movers.map((coin) => `
+          <button class="pro-top-mover-row ${coin.id === selectedCoinId ? 'is-active' : ''}" type="button" data-pro-coin="${coin.id}">
+            <span class="pro-top-mover-market">${String(coin.symbol || '').toUpperCase()} / ${proState.displayCurrency}</span>
+            <span class="pro-top-mover-change ${Number(coin.change || 0) >= 0 ? 'is-up' : 'is-down'}">${proSignedPercent(coin.change || 0)}</span>
+            <span class="pro-top-mover-price">${proFmtPrice(coin.price, proState.displayCurrency)}</span>
+          </button>
+        `).join('');
+      }
+
+      function proTradingViewSymbolForCoin(coin) {
+        const map = {
+          bitcoin: 'BINANCE:BTCUSDT',
+          ethereum: 'BINANCE:ETHUSDT',
+          solana: 'BINANCE:SOLUSDT',
+          ripple: 'BINANCE:XRPUSDT',
+          binancecoin: 'BINANCE:BNBUSDT',
+          cardano: 'BINANCE:ADAUSDT',
+          dogecoin: 'BINANCE:DOGEUSDT',
+          chainlink: 'BINANCE:LINKUSDT',
+          'avalanche-2': 'BINANCE:AVAXUSDT',
+          tron: 'BINANCE:TRXUSDT',
+          toncoin: 'BINANCE:TONUSDT',
+        };
+        if (!coin) return 'BINANCE:BTCUSDT';
+        return map[String(coin.id || '').toLowerCase()] || `BINANCE:${String(coin.symbol || 'BTC').toUpperCase()}USDT`;
+      }
+
+      function proLoadTradingViewScript() {
+        if (window.TradingView) {
+          return Promise.resolve(window.TradingView);
+        }
+        if (proState.tradingViewScriptPromise) {
+          return proState.tradingViewScriptPromise;
+        }
+
+        proState.tradingViewScriptPromise = new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = 'https://s3.tradingview.com/tv.js';
+          script.async = true;
+          script.onload = () => resolve(window.TradingView);
+          script.onerror = () => reject(new Error('TradingView script failed to load.'));
+          document.head.appendChild(script);
+        });
+
+        return proState.tradingViewScriptPromise;
+      }
+
+      async function proRenderTradingView(force = false) {
+        const selectedCoin = proState.liveDesk?.selectedCoin || null;
+        const container = document.getElementById('proTradingViewWidget');
+        const fallback = document.getElementById('proLiveChartFallback');
+        if (!container || !selectedCoin) return;
+
+        const tradingViewSymbol = proTradingViewSymbolForCoin(selectedCoin);
+        const widgetKey = `${selectedCoin.id}:${proState.chartInterval}`;
+        if (!force && widgetKey === proState.tradingViewKey) {
+          return;
+        }
+
+        try {
+          await proLoadTradingViewScript();
+          if (!window.TradingView || typeof window.TradingView.widget !== 'function') {
+            throw new Error('TradingView widget unavailable.');
+          }
+
+          proState.tradingViewKey = widgetKey;
+          container.innerHTML = '';
+          fallback?.classList.add('is-hidden');
+
+          new window.TradingView.widget({
+            container_id: 'proTradingViewWidget',
+            autosize: true,
+            symbol: tradingViewSymbol,
+            interval: proState.chartInterval,
+            timezone: 'Etc/UTC',
+            theme: 'dark',
+            style: '1',
+            locale: 'en',
+            enable_publishing: false,
+            hide_top_toolbar: false,
+            hide_legend: false,
+            save_image: false,
+            allow_symbol_change: false,
+            withdateranges: true,
+            studies: ['Volume@tv-basicstudies'],
+            backgroundColor: '#131316',
+            gridColor: 'rgba(255,255,255,0.06)',
+            details: false,
+          });
+        } catch (error) {
+          console.error('TradingView render failed:', error);
+          proState.tradingViewKey = '';
+          container.innerHTML = '';
+          fallback?.classList.remove('is-hidden');
+          proRenderSvgChart('proLiveChartFallback', proState.liveDesk?.chart || [], selectedCoin);
+        }
+      }
+
+      function proRenderFallbackIfVisible() {
+        const fallback = document.getElementById('proLiveChartFallback');
+        if (fallback && !fallback.classList.contains('is-hidden')) {
+          proRenderSvgChart('proLiveChartFallback', proState.liveDesk?.chart || [], proState.liveDesk?.selectedCoin || null);
+        }
+      }
+
+      function proRenderDesk() {
+        proState.autoQueue = proBuildAutoQueue(proState.signals, proState.liveDesk?.topCoins || []);
+        proRenderDeskHeader();
+        proRenderBookingPanel();
+        proRenderOrderBook();
+        proRenderTopMovers();
+        proRenderFallbackIfVisible();
+      }
+
+      async function proLoadSignals() {
+        const response = await proFetchFresh('/api/pro/signals');
+        if (!response.ok) {
+          if (response.status === 401) throw new Error('Login required');
+          throw new Error('Could not load pro signals');
+        }
+        const data = await response.json();
+        if (!data.ok) throw new Error(data.message || 'Could not load pro signals');
+        proState.signals = Array.isArray(data.signals) ? data.signals : [];
+        proState.displayCurrency = data.displayCurrency || proState.displayCurrency;
+        proRenderDesk();
+      }
+
+      async function proLoadMarket(coinId = '', options = {}) {
+        const previousSelectedId = proState.liveDesk?.selectedCoinId || '';
+        let liveDeskData = null;
+        let marketPayload = null;
+
+        const liveDeskUrl = `/api/live-desk${coinId ? `?coin_id=${encodeURIComponent(coinId)}` : ''}`;
+
+        try {
+          const liveDeskResponse = await proFetchFresh(liveDeskUrl);
+          if (liveDeskResponse.status === 401) throw new Error('Login required');
+          if (liveDeskResponse.ok) {
+            liveDeskData = await liveDeskResponse.json();
+          }
+        } catch (error) {
+          console.error('Pro live desk fetch failed:', error);
+        }
+
+        try {
+          const marketResponse = await proFetchFresh('/api/crypto-data');
+          if (marketResponse.ok) {
+            marketPayload = await marketResponse.json();
+            proState.marketSummary = marketPayload.summary || proState.marketSummary;
+          }
+        } catch (error) {
+          console.error('Pro market summary fetch failed:', error);
+        }
+
+        const resolvedDesk = liveDeskData && Array.isArray(liveDeskData.topCoins) && liveDeskData.topCoins.length
+          ? liveDeskData
+          : proBuildLiveDeskFallback(marketPayload, coinId || liveDeskData?.selectedCoinId || '');
+
+        if (!resolvedDesk.topCoins.length) {
+          throw new Error('Could not load live desk');
+        }
+
+        proState.liveDesk = {
+          topCoins: Array.isArray(resolvedDesk.topCoins) ? resolvedDesk.topCoins : [],
+          selectedCoin: resolvedDesk.selectedCoin || null,
+          selectedCoinId: resolvedDesk.selectedCoinId || '',
+          chart: Array.isArray(resolvedDesk.chart) && resolvedDesk.chart.length
+            ? resolvedDesk.chart
+            : proBuildFallbackChart(resolvedDesk.selectedCoin?.price, resolvedDesk.selectedCoin?.change),
+          source: resolvedDesk.source || {},
+        };
+        proState.lastDeskRefreshAt = Date.now();
+        proState.orderBookSeed = proState.lastDeskRefreshAt;
+
+        proRenderDesk();
+        await proRenderTradingView(Boolean(options.forceTradingView) || previousSelectedId !== proState.liveDesk.selectedCoinId);
+        proConnectStream();
+      }
+
+      function proApplyStreamTick(payload) {
+        if (!proState.liveDesk || !Array.isArray(proState.liveDesk.topCoins)) return;
+
+        const coinId = String(payload?.id || '').trim().toLowerCase();
+        const price = Number(payload?.price);
+        const change = Number(payload?.change_24h);
+        const marketCap = Number(payload?.market_cap);
+        if (!coinId || !Number.isFinite(price)) return;
+
+        const index = proState.liveDesk.topCoins.findIndex((coin) => String(coin.id || '').toLowerCase() === coinId);
+        if (index === -1) return;
+
+        const existingCoin = proState.liveDesk.topCoins[index];
+        const updatedCoin = {
+          ...existingCoin,
+          price,
+          change: Number.isFinite(change) ? change : existingCoin.change,
+          market_cap: Number.isFinite(marketCap) ? marketCap : existingCoin.market_cap,
+          high_24h: Math.max(Number(existingCoin.high_24h || price), price),
+          low_24h: Math.min(Number(existingCoin.low_24h || price), price),
+        };
+
+        const nextCoins = [...proState.liveDesk.topCoins];
+        nextCoins[index] = updatedCoin;
+        nextCoins.sort((left, right) => Number(right.market_cap || 0) - Number(left.market_cap || 0));
+        proState.liveDesk.topCoins = nextCoins;
+        proState.lastTickAt = Date.now();
+        proState.orderBookSeed = proState.lastTickAt + Math.round(price * 1000);
+
+        if (coinId === String(proState.liveDesk.selectedCoinId || '').toLowerCase()) {
+          proState.liveDesk.selectedCoin = updatedCoin;
+          proState.liveDesk.chart = proNormalizeChartPoints([
+            ...(Array.isArray(proState.liveDesk.chart) ? proState.liveDesk.chart : []),
+            { timestamp: Date.now(), price },
+          ], 160);
+        }
+
+        proRenderDesk();
+      }
+
+      function proConnectStream() {
+        if (!proState.liveDesk?.topCoins?.length || typeof EventSource === 'undefined') {
+          return;
+        }
+
+        const streamKey = proState.liveDesk.topCoins.map((coin) => coin.id).filter(Boolean).join(',');
+        if (proState.eventSource && proState.streamKey === streamKey) {
+          return;
+        }
+
+        if (proState.eventSource) {
+          proState.eventSource.close();
+        }
+
+        proState.streamKey = streamKey;
+        proState.streamConnected = false;
+        proState.eventSource = new EventSource(`/stream?ids=${encodeURIComponent(streamKey)}`);
+        proState.eventSource.onmessage = (event) => {
+          try {
+            proApplyStreamTick(JSON.parse(event.data));
+          } catch (error) {
+            console.error('Pro desk stream parse error:', error);
+          }
+        };
+        proState.eventSource.onopen = () => {
+          proState.streamConnected = true;
+          proRenderDesk();
+        };
+        proState.eventSource.onerror = () => {
+          proState.streamConnected = false;
+          proRenderDesk();
+        };
+      }
+
+      function proScheduleSignalRefresh() {
+        if (proState.signalPollTimer) {
+          window.clearInterval(proState.signalPollTimer);
+        }
+        proState.signalPollTimer = window.setInterval(() => {
+          proLoadSignals().catch((error) => console.error('Signal refresh failed:', error));
+        }, 45000);
+      }
+
+      function proScheduleMarketRefresh() {
+        if (proState.marketRefreshTimer) {
+          window.clearInterval(proState.marketRefreshTimer);
+        }
+        proState.marketRefreshTimer = window.setInterval(() => {
+          if (document.hidden) {
+            return;
+          }
+          const selectedCoinId = proState.liveDesk?.selectedCoinId || '';
+          proLoadMarket(selectedCoinId).catch((error) => console.error('Market refresh failed:', error));
+        }, 25000);
+      }
+
+      async function loadProMode() {
+        const [signalsResult, marketResult] = await Promise.allSettled([proLoadSignals(), proLoadMarket()]);
+
+        if (signalsResult.status === 'rejected') {
+          console.error('Pro signals load failed:', signalsResult.reason);
+          document.getElementById('proSignalTape').innerHTML = '<p class="pro-empty">Failed to load signals.</p>';
+        }
+
+        if (marketResult.status === 'rejected') {
+          console.error('Pro market load failed:', marketResult.reason);
+          document.getElementById('proTopMovers').innerHTML = '<p class="pro-empty">Failed to load top movers.</p>';
+          document.getElementById('proOrderBookAsks').innerHTML = '<p class="pro-empty">Failed to build order book.</p>';
+          document.getElementById('proOrderBookBids').innerHTML = '<p class="pro-empty">Failed to build order book.</p>';
+        }
+
+        if (signalsResult.status === 'rejected' && marketResult.status === 'rejected') {
+          throw new Error('Pro desk load failed');
+        }
+
+        proScheduleSignalRefresh();
+        proScheduleMarketRefresh();
+      }
+
+      document.addEventListener('DOMContentLoaded', () => {
+        if (proRequiresLogin) {
+          return;
+        }
+
+        proWirePanelMenu();
+        loadProMode().catch((error) => console.error('Pro desk load failed:', error));
+
+        window.addEventListener('vaultsignals:currency-changed', () => {
+          const nextCurrency = state.activeCurrency?.code || proState.displayCurrency;
+          if (!nextCurrency || nextCurrency === proState.displayCurrency) {
+            return;
+          }
+          proState.displayCurrency = nextCurrency;
+          proLoadSignals().catch((error) => console.error('Pro currency refresh failed:', error));
+        });
+
+        document.getElementById('proTopMovers')?.addEventListener('click', (event) => {
+          const trigger = event.target.closest('[data-pro-coin]');
+          if (!trigger) return;
+          const coinId = trigger.dataset.proCoin || '';
+          if (!coinId || coinId === proState.liveDesk?.selectedCoinId) return;
+          proLoadMarket(coinId).catch((error) => console.error('Top mover switch failed:', error));
+        });
+
+        document.getElementById('proSignalTape')?.addEventListener('click', (event) => {
+          const trigger = event.target.closest('[data-pro-signal-symbol]');
+          if (!trigger) return;
+          const coin = proGetCoinBySymbol(trigger.dataset.proSignalSymbol || '');
+          if (!coin || coin.id === proState.liveDesk?.selectedCoinId) return;
+          proLoadMarket(coin.id).catch((error) => console.error('Signal switch failed:', error));
+        });
+
+        document.getElementById('proOrderTypeTabs')?.addEventListener('click', (event) => {
+          const trigger = event.target.closest('[data-pro-order-type]');
+          if (!trigger) return;
+          proState.orderType = trigger.dataset.proOrderType || 'limit';
+          if (proState.orderType === 'auto') {
+            proState.executionMode = 'auto';
+          }
+          proRenderDesk();
+        });
+
+        document.querySelectorAll('[data-pro-side]').forEach((button) => {
+          button.addEventListener('click', () => {
+            proState.manualSide = button.dataset.proSide || null;
+            proRenderDesk();
+          });
+        });
+
+        document.getElementById('proBookingAiRoute')?.addEventListener('click', () => {
+          proState.executionMode = proState.executionMode === 'auto' ? 'manual' : 'auto';
+          if (proState.executionMode === 'auto') {
+            proState.orderType = 'auto';
+          }
+          proRenderDesk();
+        });
+
+        document.getElementById('proBookingReactNow')?.addEventListener('click', () => {
+          proState.executionMode = 'manual';
+          proRenderDesk();
+        });
+
+        document.getElementById('proBookingEntry')?.addEventListener('input', proUpdateBookingTotal);
+        document.getElementById('proBookingSize')?.addEventListener('input', proUpdateBookingTotal);
+
+        document.querySelectorAll('[data-pro-interval]').forEach((button) => {
+          button.addEventListener('click', () => {
+            const nextInterval = button.dataset.proInterval || '60';
+            if (nextInterval === proState.chartInterval) return;
+            proState.chartInterval = nextInterval;
+            document.querySelectorAll('[data-pro-interval]').forEach((item) => {
+              item.classList.toggle('is-active', item.dataset.proInterval === nextInterval);
+            });
+            proRenderTradingView(true).catch((error) => console.error('TradingView interval switch failed:', error));
+          });
+        });
+
+        window.addEventListener('beforeunload', () => {
+          if (proState.eventSource) {
+            proState.eventSource.close();
+          }
+          if (proState.signalPollTimer) {
+            window.clearInterval(proState.signalPollTimer);
+          }
+          if (proState.marketRefreshTimer) {
+            window.clearInterval(proState.marketRefreshTimer);
+          }
+        });
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VaultSignals</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='vaultsignals-logo.png') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body data-vat-rate="{{ ui_config.vat_rate }}" data-currency-symbol="{{ ui_config.currency_symbol }}" data-default-currency-code="{{ ui_config.default_currency_code }}">
+    <canvas id="marketCanvas"></canvas>
+    <div class="site-shell">
+      <div class="animated-bg">
+        <span class="glow glow-1"></span>
+        <span class="glow glow-2"></span>
+        <span class="glow glow-3"></span>
+        <div class="market-lines"></div>
+      </div>
+
+      <header class="navbar">
+        <div class="brand">
+          <div class="logo" aria-label="Vault Signals logo">
+            <img class="logo-img" src="{{ url_for('static', filename='vaultsignals-logo.png') }}" alt="Vault Signals logo" />
+          </div>
+          <div>
+            <p class="eyebrow">Premium Signals</p>
+            <h2 class="brand-title">VaultSignals</h2>
+          </div>
+        </div>
+        <nav class="nav-links" id="navLinks">
+          <a href="/">Home</a>
+          <a href="/price" class="nav-active">Price</a>
+          <a class="hidden" data-member-portal-link href="/your-signals">Your Signals</a>
+          <a href="/about-us">About Us</a>
+          <a class="hidden" data-member-portal-link href="/account/dashboard#community-hub-section">Community</a>
+          <a href="#feedback">Feedback</a>
+        </nav>
+
+        <div class="nav-actions">
+          <a class="bitvavo-btn" href="{{ ui_config.bitvavo_url }}" target="_blank" rel="noreferrer">Bitvavo</a>
+          <button class="ghost-btn nav-login-btn" data-login-trigger type="button">Log In</button>
+          <a href="/settings" class="nav-settings-btn" title="Settings" aria-label="Settings">⚙</a>
+          <button class="menu-btn" id="menuToggle" aria-label="Open menu">☰</button>
+        </div>
+      </header>
+
+      <main>
+        <div class="pricing-page-hero">
+          <span class="pricing-hero-kicker">✦ VaultSignalsAI Plans</span>
+          <h1 class="pricing-hero-headline">Signals built for<br><span class="pricing-hero-accent">serious traders</span></h1>
+          <p class="pricing-hero-sub">Pick the tier that fits your pace. Real-time signals, clear invalidation levels, and live market context — upgrade anytime.</p>
+          <div class="pricing-hero-trust">
+            <span><span class="trust-check" aria-hidden="true">✓</span> No lock-in contracts</span>
+            <span><span class="trust-check" aria-hidden="true">✓</span> Cancel anytime</span>
+            <span><span class="trust-check" aria-hidden="true">✓</span> Upgrade instantly</span>
+          </div>
+        </div>
+
+        <section class="section" id="priceSection">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Pricing</p>
+              <h2>Choose your VaultSignalsAI execution plan</h2>
+              <p class="section-copy">Start monthly or switch to annual and lock in better pricing as your signal usage grows.</p>
+            </div>
+            <div class="pricing-switch">
+              <button class="toggle-btn active" id="switchPersonal">Monthly Billing</button>
+              <button class="toggle-btn" id="switchBusiness">Annual Billing <em class="save-pill">Save 18%</em></button>
+            </div>
+          </div>
+          <p class="pricing-microcopy" id="pricingCycleNote">Monthly billing selected. Cancel anytime.</p>
+
+          <div class="pricing-grid" id="pricingGrid">
+            <article class="price-card" id="plusCard">
+              <div class="price-head">
+                <h3>Tier 1 Starter</h3>
+                <span class="tag">Starter</span>
+              </div>
+              <div class="price-value">€23<span>/month</span></div>
+              <p class="price-sub">Monthly billing (includes VAT)</p>
+              <p class="price-save" id="plusSave">or €20/mo billed annually</p>
+              <p class="price-tagline">Start simple with 1 signal/day</p>
+              <ul class="price-features">
+                <li>1 focused signal each day</li>
+                <li>Clear entry and target levels</li>
+                <li>Simple and direct market context</li>
+                <li>Built for new members</li>
+              </ul>
+              <button class="primary-btn price-cta-btn" data-tier-pick="1">Start Tier 1</button>
+            </article>
+
+            <article class="price-card featured" id="businessCard">
+              <div class="price-head">
+                <h3>Business Starter</h3>
+                <span class="badge">Business</span>
+              </div>
+              <div class="price-value">€35<span>/month</span></div>
+              <p class="price-sub">Monthly billing (includes VAT)</p>
+              <p class="price-save" id="businessSave">or €29/mo billed annually</p>
+              <p class="price-tagline">Blue business plan for teams</p>
+              <ul class="price-features">
+                <li>Multi-seat workspace with role separation</li>
+                <li>Shared watchlists and synchronized alerts</li>
+                <li>Fast briefings for pre-market and session open</li>
+                <li>Internal collaboration notes and handoffs</li>
+                <li>Priority roadmap access and onboarding help</li>
+              </ul>
+              <button class="primary-btn price-cta-btn" data-tier-pick="2">Start Business</button>
+            </article>
+          </div>
+
+          <div class="price-footer">
+            <a class="ghost-btn" href="/">← Return to main page</a>
+          </div>
+
+          <section class="signal-matrix" id="checkout">
+            <div class="section-heading signal-matrix-head">
+              <div>
+                <p class="eyebrow">Signal Tiers</p>
+                <h2>More tiers below</h2>
+                <p class="section-copy section-copy-tight">Continue with Tier 2 to Tier 6 based on how many daily signals you need.</p>
+              </div>
+            </div>
+
+            <div class="signal-note">Lifetime unlocks are available only from Tier 4 upward.</div>
+
+            <div class="tier-cube-grid">
+              <article class="tier-cube" data-tier="2">
+                <div class="tier-cube-head">
+                  <h3>Tier 2</h3>
+                  <div class="tier-cube-head-right">
+                    <div class="signal-bars" data-bars="2" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                    <span class="tier-cube-badge">Steady</span>
+                  </div>
+                </div>
+                <div class="tier-cube-price">£65<span>/month</span></div>
+                <p class="tier-cube-sub">2 signals/day for stable execution</p>
+                <p class="tier-cube-tagline">More coverage through the session</p>
+                <ul class="tier-cube-list">
+                  <li>2 signal pushes each day</li>
+                  <li>Cleaner invalidation levels</li>
+                  <li>Better multi-setup flexibility</li>
+                </ul>
+                <button type="button" class="mini-tier-btn" data-tier-pick="2">Select Tier 2</button>
+              </article>
+              <article class="tier-cube" data-tier="3">
+                <div class="tier-cube-head">
+                  <h3>Tier 3</h3>
+                  <div class="tier-cube-head-right">
+                    <div class="signal-bars" data-bars="3" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                    <span class="tier-cube-badge">Active</span>
+                  </div>
+                </div>
+                <div class="tier-cube-price">£90<span>/month</span></div>
+                <p class="tier-cube-sub">3 signals/day for active traders</p>
+                <p class="tier-cube-tagline">Higher frequency, still structured</p>
+                <ul class="tier-cube-list">
+                  <li>3 high-conviction signals daily</li>
+                  <li>Session-aligned setup timing</li>
+                  <li>Priority weekly tuning updates</li>
+                </ul>
+                <button type="button" class="mini-tier-btn" data-tier-pick="3">Select Tier 3</button>
+              </article>
+              <article class="tier-cube" data-tier="4">
+                <div class="tier-cube-head">
+                  <h3>Tier 4</h3>
+                  <div class="tier-cube-head-right">
+                    <div class="signal-bars" data-bars="4" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                    <span class="tier-cube-badge">Popular</span>
+                  </div>
+                </div>
+                <div class="tier-cube-price">£125<span>/month</span></div>
+                <p class="tier-cube-sub">4 signals/day with lifetime option</p>
+                <p class="tier-cube-tagline">Built for consistent daily output</p>
+                <ul class="tier-cube-list">
+                  <li>4 signal drops each day</li>
+                  <li>Faster updates on invalid setups</li>
+                  <li>Lifetime access available</li>
+                </ul>
+                <button type="button" class="mini-tier-btn" data-tier-pick="4">Select Tier 4</button>
+              </article>
+              <article class="tier-cube" data-tier="5">
+                <div class="tier-cube-head">
+                  <h3>Tier 5</h3>
+                  <div class="tier-cube-head-right">
+                    <div class="signal-bars" data-bars="5" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                    <span class="tier-cube-badge">Pro</span>
+                  </div>
+                </div>
+                <div class="tier-cube-price">£160<span>/month</span></div>
+                <p class="tier-cube-sub">5 signals/day for high activity</p>
+                <p class="tier-cube-tagline">Strong intraday opportunity flow</p>
+                <ul class="tier-cube-list">
+                  <li>5 market-ready setups daily</li>
+                  <li>Expanded market session range</li>
+                  <li>Priority support routing</li>
+                </ul>
+                <button type="button" class="mini-tier-btn" data-tier-pick="5">Select Tier 5</button>
+              </article>
+              <article class="tier-cube" data-tier="6">
+                <div class="tier-cube-head">
+                  <h3>Tier 6</h3>
+                  <div class="tier-cube-head-right">
+                    <div class="signal-bars" data-bars="6" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                    <span class="tier-cube-badge">Elite</span>
+                  </div>
+                </div>
+                <div class="tier-cube-price">£200<span>/month</span></div>
+                <p class="tier-cube-sub">6 signals/day maximum coverage</p>
+                <p class="tier-cube-tagline">Top-tier access for full pace traders</p>
+                <ul class="tier-cube-list">
+                  <li>6 premium setups per day</li>
+                  <li>Fastest signal turnaround</li>
+                  <li>Full session coverage windows</li>
+                </ul>
+                <button type="button" class="mini-tier-btn" data-tier-pick="6">Select Tier 6</button>
+              </article>
+            </div>
+
+            <div class="price-trust-bar price-trust-bar-bottom">
+              <span><span class="trust-check" aria-hidden="true">✓</span> No setup fees</span>
+              <span><span class="trust-check" aria-hidden="true">↺</span> Cancel anytime</span>
+              <span><span class="trust-check" aria-hidden="true">🔒</span> Secure checkout</span>
+            </div>
+          </section>
+        </section>
+      </main>
+
+      {% include 'sections/site_footer.html' %}
+    </div>
+
+    {% include 'auth_modal.html' %}
+    {% include 'feedback_modal.html' %}
+    <div id="checkoutModal" class="modal hidden" aria-modal="true" role="dialog">
+      <div class="modal-content checkout-modal-card">
+              <button id="checkoutModalClose" class="modal-close co-close-btn" aria-label="Close checkout">✕</button>
+
+              <div class="checkout-header">
+                <p class="checkout-kicker">✦ Secure Checkout</p>
+                <h3 class="checkout-title">Billing &amp; Plan Setup</h3>
+              </div>
+
+              <div class="checkout-steps-nav">
+                <div class="step-chip active" data-step-chip="1">
+                  <span class="step-num">1</span>
+                  <span class="step-label">What You Buy</span>
+                </div>
+                <span class="step-connector" aria-hidden="true"></span>
+                <div class="step-chip" data-step-chip="2">
+                  <span class="step-num">2</span>
+                  <span class="step-label">Address &amp; Payment</span>
+                </div>
+                <span class="step-connector" aria-hidden="true"></span>
+                <div class="step-chip" data-step-chip="3">
+                  <span class="step-num">3</span>
+                  <span class="step-label">Confirm</span>
+                </div>
+              </div>
+
+              <form id="billingForm" class="checkout-panel">
+
+                <!-- ── STEP 1 ── -->
+                <section class="checkout-step active" id="checkoutStep1">
+                  <div class="checkout-body">
+                    <div class="checkout-left">
+                      <p class="checkout-step-intro">Choose your plan and how often you want to be billed.</p>
+                      <div class="checkout-fields-group">
+                        <div class="checkout-field">
+                          <label for="billingTier">Plan Tier</label>
+                          <select id="billingTier" name="billingTier" required>
+                            <option value="1">Tier 1 — 1 signal / day</option>
+                            <option value="2">Tier 2 — 2 signals / day</option>
+                            <option value="3">Tier 3 — 3 signals / day</option>
+                            <option value="4">Tier 4 — 4 signals / day</option>
+                            <option value="5">Tier 5 — 5 signals / day</option>
+                            <option value="6">Tier 6 — 6 signals / day</option>
+                          </select>
+                        </div>
+                        <div class="checkout-field">
+                          <label for="billingCycle">Billing Cycle</label>
+                          <select id="billingCycle" name="billingCycle" required>
+                            <option value="weekly">Weekly</option>
+                            <option value="monthly">Monthly</option>
+                            <option value="quarterly">Quarterly</option>
+                            <option value="annual">Annual</option>
+                            <option value="lifetime">Lifetime</option>
+                          </select>
+                        </div>
+                        <div class="checkout-field checkout-field-full">
+                          <label for="billingDiscordTag">Discord Discount Tag <span class="field-opt">(optional)</span></label>
+                          <select id="billingDiscordTag" name="billingDiscordTag">
+                            <option value="">No discount — standard price</option>
+                            {% for tag_key, tag_label in discord_tag_labels.items() %}
+                            <option value="{{ tag_key }}">{{ tag_label }}</option>
+                            {% endfor %}
+                          </select>
+                        </div>
+                      </div>
+                      <input id="billingSignals" type="hidden" value="1" />
+                    </div>
+                    <div class="checkout-right">
+                      <div class="order-summary-card">
+                        <p class="order-summary-label">Order Summary</p>
+                        <div class="order-summary-tier-row">
+                          <span class="order-summary-tier-name" id="orderSummaryTierName">Tier 1</span>
+                          <span class="order-summary-signals"><span id="orderSummarySignals">1</span> signal / day</span>
+                        </div>
+                        <p class="order-summary-cycle" id="orderSummaryCycle">Monthly billing</p>
+                        <div class="order-summary-divider"></div>
+                        <div class="billing-quote" id="billingQuote">Estimated: £3.50</div>
+                        <p class="order-summary-note">VAT (21%) added at final step</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="billing-actions">
+                    <button type="button" class="co-next-btn" id="billingNextToStep2">Next: Address &amp; Payment <span aria-hidden="true">→</span></button>
+                  </div>
+                </section>
+
+                <!-- ── STEP 2 ── -->
+                <section class="checkout-step" id="checkoutStep2">
+                  <div id="checkoutStep2Lock" class="checkout-lock hidden">🔒 Account required to continue</div>
+                  <div class="checkout-body checkout-step-content" id="checkoutStep2Content">
+                    <div class="checkout-left">
+                      <p class="checkout-step-intro">Enter your billing address details.</p>
+                      <div class="checkout-fields-group">
+                        <div class="checkout-field">
+                          <label for="billingFullName">Full Name</label>
+                          <input id="billingFullName" name="billingFullName" type="text" placeholder="Jane Doe" autocomplete="name" />
+                        </div>
+                        <div class="checkout-field">
+                          <label for="billingCompany">Company <span class="field-opt">(optional)</span></label>
+                          <input id="billingCompany" name="billingCompany" type="text" placeholder="Vault Trading Ltd" autocomplete="organization" />
+                        </div>
+                        <div class="checkout-field checkout-field-full">
+                          <label for="billingAddress">Street Address</label>
+                          <input id="billingAddress" name="billingAddress" type="text" placeholder="Streetname 12" autocomplete="street-address" />
+                        </div>
+                        <div class="checkout-field">
+                          <label for="billingZip">Zip / Postcode</label>
+                          <input id="billingZip" name="billingZip" type="text" placeholder="1234 AB" autocomplete="postal-code" />
+                        </div>
+                        <div class="checkout-field">
+                          <label for="billingCountry">Country</label>
+                          <input id="billingCountry" name="billingCountry" type="text" placeholder="Netherlands" autocomplete="country-name" />
+                        </div>
+                      </div>
+                    </div>
+                    <div class="checkout-right">
+                      <div class="payment-method-bar" id="paymentMethodBar">
+                        <p class="payment-title">Payment Method</p>
+                        <div class="payment-options">
+                          <button type="button" class="payment-method-btn active" data-payment-method="creditcard">
+                            <span class="pm-icon">💳</span><span class="pm-label">Credit Card</span>
+                          </button>
+                          <button type="button" class="payment-method-btn" data-payment-method="ideal">
+                            <span class="pm-icon">🏦</span><span class="pm-label">iDEAL</span>
+                          </button>
+                          <button type="button" class="payment-method-btn" data-payment-method="paypal">
+                            <span class="pm-icon">🅿️</span><span class="pm-label">PayPal</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <p class="account-required-note" id="step2RequiredNote">Account required</p>
+                  <div class="billing-actions">
+                    <button type="button" class="co-back-btn" id="billingBackToStep1">← Back</button>
+                    <button type="button" class="co-next-btn" id="billingNextToStep3">Review Order <span aria-hidden="true">→</span></button>
+                  </div>
+                </section>
+
+                <!-- ── STEP 3 ── -->
+                <section class="checkout-step" id="checkoutStep3">
+                  <div id="checkoutStep3Lock" class="checkout-lock hidden">🔒 Account required to confirm</div>
+                  <div class="checkout-receipt checkout-step-content" id="checkoutStep3Content">
+                    <p class="checkout-receipt-head">Order Review</p>
+                    <div class="receipt-rows">
+                      <div class="receipt-row"><span>Plan</span><span id="reviewTier">Tier 1</span></div>
+                      <div class="receipt-row"><span>Signals / day</span><span id="reviewSignals">1</span></div>
+                      <div class="receipt-row"><span>Billing cycle</span><span id="reviewCycle">weekly</span></div>
+                      <div class="receipt-row"><span>Payment</span><span id="reviewMethod">Credit Card</span></div>
+                      <div class="receipt-row"><span>Discount tag</span><span id="reviewTag">Standard</span></div>
+                    </div>
+                    <div class="receipt-totals">
+                      <div class="receipt-row"><span>Subtotal</span><span id="reviewSubtotal">£3.50</span></div>
+                      <div class="receipt-row receipt-row-tax"><span>Tax (21%)</span><span id="reviewTax">£0.74</span></div>
+                      <div class="receipt-row receipt-row-total"><span>Total due</span><span id="reviewPrice">£4.24</span></div>
+                    </div>
+                  </div>
+                  <label class="terms-check-wrap">
+                    <input id="termsAgree" type="checkbox" />
+                    <span>I agree to the <a href="/terms-and-conditions" target="_blank" rel="noreferrer">terms and conditions</a>.</span>
+                  </label>
+                  <p class="account-required-note" id="step3RequiredNote">Account required</p>
+                  <div class="billing-actions">
+                    <button type="button" class="co-back-btn" id="billingBackToStep2">← Back</button>
+                    <button type="submit" class="co-finalize-btn" id="billingFinalizeBtn">Order &amp; Continue To Bank 🔒</button>
+                  </div>
+                  <p id="billingMessage" class="message-box billing-message"></p>
+                </section>
+
+              </form>
+      </div>
+    </div>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+  </body>
+</html>

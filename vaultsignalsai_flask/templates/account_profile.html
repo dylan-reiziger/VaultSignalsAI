@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VaultSignals</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='vaultsignals-logo.png') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body data-vat-rate="{{ ui_config.vat_rate }}" data-currency-symbol="{{ ui_config.currency_symbol }}" data-default-currency-code="{{ ui_config.default_currency_code }}">
+    <canvas id="marketCanvas"></canvas>
+    <div class="site-shell">
+      <div class="animated-bg">
+        <span class="glow glow-1"></span>
+        <span class="glow glow-2"></span>
+        <span class="glow glow-3"></span>
+        <div class="market-lines"></div>
+      </div>
+
+      <header class="navbar">
+        <div class="brand">
+          <div class="logo" aria-label="Vault Signals logo">
+            <img class="logo-img" src="{{ url_for('static', filename='vaultsignals-logo.png') }}" alt="Vault Signals logo" />
+          </div>
+          <div>
+            <p class="eyebrow">Premium Signals</p>
+            <h2 class="brand-title">VaultSignals</h2>
+          </div>
+        </div>
+
+        <nav class="nav-links" id="navLinks">
+          <a href="/">Home</a>
+          <a href="/price">Price</a>
+          <a class="hidden" data-member-portal-link href="/your-signals">Your Signals</a>
+          <a href="/about-us">About Us</a>
+          <a class="hidden" data-member-portal-link href="/account/dashboard#community-hub-section">Community</a>
+          <a href="#feedback">Feedback</a>
+        </nav>
+
+        <div class="nav-actions">
+          <a class="bitvavo-btn" href="{{ ui_config.bitvavo_url }}" target="_blank" rel="noreferrer">Bitvavo</a>
+          <button class="ghost-btn nav-login-btn" data-login-trigger type="button">Log In</button>
+          <a href="/settings" class="nav-settings-btn" title="Settings" aria-label="Settings">⚙</a>
+          <button class="menu-btn" id="menuToggle" aria-label="Open menu">☰</button>
+        </div>
+      </header>
+
+      <main>
+        <section class="account-profile-topbar">
+          <div class="account-profile-shell account-profile-topbar-inner">
+            <a href="/settings" class="account-profile-backlink">&larr; Back to settings</a>
+            <a href="/account/dashboard" class="account-profile-backlink">Account dashboard</a>
+          </div>
+        </section>
+
+        <section class="account-profile-shell account-profile-hero">
+          <div class="account-profile-title">
+            <p class="eyebrow">Personal details</p>
+            <h1 class="settings-page-heading">Advanced account editor</h1>
+            <p class="settings-page-lede">This page keeps your identity details together in one place while the main settings page stays focused on platform preferences.</p>
+          </div>
+        </section>
+
+        <section class="account-profile-shell">
+          <div class="account-profile-grid">
+            <aside class="account-profile-identity-card">
+              <button id="accountProfileAvatarTrigger" class="account-profile-avatar-button" type="button" aria-label="Edit account avatar">
+                <img id="accountProfileAvatar" src="{{ url_for('static', filename='vaultsignals-logo.png') }}" alt="Account avatar" />
+                <span class="account-profile-avatar-overlay">Edit profile</span>
+              </button>
+              <h2 id="accountProfileDisplayName">Loading...</h2>
+              <p id="accountProfileUsername" class="account-profile-username">@member</p>
+              <p id="accountProfileEmailLead" class="account-profile-email">Waiting for account details.</p>
+              <p class="account-profile-note">Hover the avatar for the lighter overlay, then click it to jump straight into the profile image field.</p>
+            </aside>
+
+            <section class="account-profile-details-panel">
+              <div class="settings-card-head">
+                <p class="settings-card-kicker">Overview</p>
+                <h3>Account information</h3>
+                <p class="settings-card-copy">The rows below mirror the personal-detail style you shared, while keeping the existing VaultSignals color theme.</p>
+              </div>
+
+              <div class="account-profile-detail-list">
+                <button class="account-detail-row" type="button" data-focus-target="accountProfileFullName">
+                  <span class="account-detail-status">&#10003;</span>
+                  <span class="account-detail-copy">
+                    <span class="account-detail-title">Full name</span>
+                    <span class="account-detail-desc">The name linked to your account.</span>
+                  </span>
+                  <span class="account-detail-value" id="accountDetailFullName">-</span>
+                  <span class="account-detail-edit">Edit</span>
+                </button>
+
+                <button class="account-detail-row" type="button" data-focus-target="accountProfileEmail">
+                  <span class="account-detail-status">&#10003;</span>
+                  <span class="account-detail-copy">
+                    <span class="account-detail-title">Email address</span>
+                    <span class="account-detail-desc">Primary email used for your account login.</span>
+                  </span>
+                  <span class="account-detail-value" id="accountDetailEmail">-</span>
+                  <span class="account-detail-edit">Edit</span>
+                </button>
+
+                <button class="account-detail-row" type="button" data-focus-target="accountProfilePhone">
+                  <span class="account-detail-status">&#10003;</span>
+                  <span class="account-detail-copy">
+                    <span class="account-detail-title">Phone number</span>
+                    <span class="account-detail-desc">A direct number for account contact and future recovery flows.</span>
+                  </span>
+                  <span class="account-detail-value" id="accountDetailPhone">-</span>
+                  <span class="account-detail-edit">Edit</span>
+                </button>
+
+                <button class="account-detail-row" type="button" data-focus-target="accountProfileAddress">
+                  <span class="account-detail-status">&#10003;</span>
+                  <span class="account-detail-copy">
+                    <span class="account-detail-title">Address details</span>
+                    <span class="account-detail-desc">Your saved address and postcode.</span>
+                  </span>
+                  <span class="account-detail-value" id="accountDetailAddress">-</span>
+                  <span class="account-detail-edit">Edit</span>
+                </button>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="account-profile-shell">
+          <section class="account-profile-editor-card">
+            <div class="settings-card-head">
+              <p class="settings-card-kicker">Editor</p>
+              <h3>Update your account</h3>
+              <p class="settings-card-copy">Change personal information whenever you want. Current password is only required if you change email or password.</p>
+            </div>
+
+            <form id="accountProfileForm" class="account-profile-form">
+              <div class="settings-field-grid">
+                <label>
+                  <span>Full Name</span>
+                  <input id="accountProfileFullName" type="text" maxlength="120" placeholder="Your full name" required />
+                </label>
+                <label>
+                  <span>Email Address</span>
+                  <input id="accountProfileEmail" type="email" maxlength="254" placeholder="name@example.com" required />
+                </label>
+              </div>
+
+              <div class="settings-field-grid">
+                <label>
+                  <span>Phone Number</span>
+                  <input id="accountProfilePhone" type="text" maxlength="30" placeholder="+31 6 1234 5678" />
+                </label>
+                <label>
+                  <span>Postcode</span>
+                  <input id="accountProfileZipcode" type="text" maxlength="20" placeholder="1183 KD" required />
+                </label>
+              </div>
+
+              <label>
+                <span>Address</span>
+                <input id="accountProfileAddress" type="text" maxlength="200" placeholder="Street and city" required />
+              </label>
+
+              <label>
+                <span>Avatar Image Link</span>
+                <input id="accountProfileAvatarUrl" type="url" maxlength="500" placeholder="https://... or /static/..." />
+              </label>
+
+              <div class="settings-field-grid">
+                <label>
+                  <span>Current Password</span>
+                  <input id="accountProfileCurrentPassword" type="password" autocomplete="current-password" placeholder="Needed only for email or password changes" />
+                </label>
+                <label>
+                  <span>New Password</span>
+                  <input id="accountProfileNewPassword" type="password" minlength="8" autocomplete="new-password" placeholder="Optional" />
+                </label>
+              </div>
+
+              <div class="account-profile-form-actions">
+                <button id="accountProfileSave" type="submit" class="primary-btn">Save account details</button>
+              </div>
+            </form>
+
+            <div id="accountProfileMsg" class="billing-message settings-page-message">Load your profile details to start editing.</div>
+          </section>
+        </section>
+        {% include 'sections/site_footer.html' %}
+      </main>
+    </div>
+
+    {% include 'auth_modal.html' %}
+    {% include 'feedback_modal.html' %}
+
+    <script>
+      window.VAULT_TIERS = JSON.parse('{{ tiers | tojson | safe }}');
+    </script>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <script>
+      (async function () {
+        const fallbackAvatar = "{{ url_for('static', filename='vaultsignals-logo.png') }}";
+        const form = document.getElementById('accountProfileForm');
+        const saveButton = document.getElementById('accountProfileSave');
+        const avatarTrigger = document.getElementById('accountProfileAvatarTrigger');
+
+        function setMsg(text, ok) {
+          const el = document.getElementById('accountProfileMsg');
+          if (!el) return;
+          el.textContent = text;
+          el.style.color = ok ? '#84f5a9' : 'rgba(255,255,255,0.78)';
+          el.style.borderColor = ok ? 'rgba(76,239,120,0.45)' : 'rgba(255,255,255,0.12)';
+        }
+
+        async function parseResponse(res) {
+          try {
+            return await res.json();
+          } catch (_) {
+            return { ok: false, message: 'Unexpected server response.' };
+          }
+        }
+
+        function renderProfile(profile) {
+          if (!profile) return;
+
+          document.getElementById('accountProfileDisplayName').textContent = profile.displayName || profile.fullName || profile.username || 'Member';
+          document.getElementById('accountProfileUsername').textContent = `@${profile.username || 'member'}`;
+          document.getElementById('accountProfileEmailLead').textContent = profile.email || 'No email available.';
+          document.getElementById('accountProfileAvatar').src = profile.avatarUrl || fallbackAvatar;
+
+          document.getElementById('accountDetailFullName').textContent = profile.fullName || '-';
+          document.getElementById('accountDetailEmail').textContent = profile.email || '-';
+          document.getElementById('accountDetailPhone').textContent = profile.phoneNumber || '-';
+          document.getElementById('accountDetailAddress').textContent = profile.addressSummary || '-';
+
+          document.getElementById('accountProfileFullName').value = profile.fullName || '';
+          document.getElementById('accountProfileEmail').value = profile.email || '';
+          document.getElementById('accountProfilePhone').value = profile.phoneNumber || '';
+          document.getElementById('accountProfileZipcode').value = profile.zipcode || '';
+          document.getElementById('accountProfileAddress').value = profile.address || '';
+          document.getElementById('accountProfileAvatarUrl').value = profile.avatarUrl && profile.avatarUrl !== fallbackAvatar ? profile.avatarUrl : '';
+        }
+
+        async function loadProfile() {
+          const response = await fetch('/api/account/profile');
+          if (response.status === 401) {
+            window.location.href = '/?login=1';
+            return;
+          }
+          const data = await parseResponse(response);
+          if (!response.ok || !data.ok) {
+            throw new Error(data.message || 'Unable to load account profile.');
+          }
+          renderProfile(data.profile);
+          setMsg('Edit any field below and save when ready.', false);
+        }
+
+        form?.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          if (saveButton) {
+            saveButton.disabled = true;
+            saveButton.textContent = 'Saving...';
+          }
+          setMsg('Saving account details...', false);
+
+          try {
+            const payload = {
+              fullName: (document.getElementById('accountProfileFullName')?.value || '').trim(),
+              email: (document.getElementById('accountProfileEmail')?.value || '').trim(),
+              phoneNumber: (document.getElementById('accountProfilePhone')?.value || '').trim(),
+              zipcode: (document.getElementById('accountProfileZipcode')?.value || '').trim(),
+              address: (document.getElementById('accountProfileAddress')?.value || '').trim(),
+              avatarUrl: (document.getElementById('accountProfileAvatarUrl')?.value || '').trim(),
+              currentPassword: document.getElementById('accountProfileCurrentPassword')?.value || '',
+              newPassword: document.getElementById('accountProfileNewPassword')?.value || '',
+            };
+
+            const response = await fetch('/api/account/profile', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await parseResponse(response);
+
+            setMsg(data.message || 'Unable to save account details.', response.ok);
+            if (response.ok && data.profile) {
+              renderProfile(data.profile);
+              const currentPassword = document.getElementById('accountProfileCurrentPassword');
+              const newPassword = document.getElementById('accountProfileNewPassword');
+              if (currentPassword) currentPassword.value = '';
+              if (newPassword) newPassword.value = '';
+            }
+          } catch (error) {
+            console.error('Account profile save failed:', error);
+            setMsg('Failed to save account details. Please try again.', false);
+          } finally {
+            if (saveButton) {
+              saveButton.disabled = false;
+              saveButton.textContent = 'Save account details';
+            }
+          }
+        });
+
+        document.querySelectorAll('[data-focus-target]').forEach((trigger) => {
+          trigger.addEventListener('click', () => {
+            const targetId = trigger.getAttribute('data-focus-target');
+            const target = targetId ? document.getElementById(targetId) : null;
+            if (target) {
+              target.focus();
+              target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          });
+        });
+
+        avatarTrigger?.addEventListener('click', () => {
+          const avatarField = document.getElementById('accountProfileAvatarUrl');
+          if (avatarField) {
+            avatarField.focus();
+            avatarField.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        });
+
+        try {
+          await loadProfile();
+        } catch (error) {
+          console.error('Account profile load failed:', error);
+          setMsg('Failed to load account details. Please refresh.', false);
+        }
+      })();
+    </script>
+  </body>
+</html>

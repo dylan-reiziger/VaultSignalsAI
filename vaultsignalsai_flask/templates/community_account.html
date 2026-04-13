@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VaultSignals</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='vaultsignals-logo.png') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body data-target-username="{{ target_username }}">
+    <div class="site-shell">
+      <main>
+        <section class="section visible">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Open Account</p>
+              <h2 id="openAccountTitle">Loading account...</h2>
+              <p id="openAccountVisibility" class="section-copy"></p>
+            </div>
+          </div>
+          <article class="panel-card">
+            <div class="community-account-head">
+              <img id="openAccountAvatar" class="community-avatar" src="/static/vaultsignals-logo.png" alt="Avatar" />
+              <div>
+                <h3 id="openAccountDisplayName">-</h3>
+                <p id="openAccountUsername">-</p>
+              </div>
+            </div>
+            <p id="openAccountBio">-</p>
+            <div id="openAccountBalance" class="community-balance-grid"></div>
+            <div id="openAccountBadges" class="badges-grid"></div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      async function loadOpenAccount() {
+        const username = document.body.dataset.targetUsername || '';
+        const response = await fetch(`/api/community/account/${encodeURIComponent(username)}`);
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          document.getElementById('openAccountTitle').textContent = data.message || 'Account unavailable';
+          return;
+        }
+
+        document.getElementById('openAccountTitle').textContent = `${data.profile.displayName} profile`;
+        document.getElementById('openAccountDisplayName').textContent = data.profile.displayName;
+        document.getElementById('openAccountUsername').textContent = `@${data.profile.username}`;
+        document.getElementById('openAccountBio').textContent = data.profile.bio || 'No bio set.';
+        document.getElementById('openAccountAvatar').src = data.profile.avatarUrl || '/static/vaultsignals-logo.png';
+        document.getElementById('openAccountVisibility').textContent = data.visibility === 'private'
+          ? 'This account is private. Financial data is hidden.'
+          : 'This account is public.';
+
+        const balanceNode = document.getElementById('openAccountBalance');
+        if (data.balance) {
+          balanceNode.innerHTML = `
+            <div><span>Balance</span><strong>£${Number(data.balance.current || 0).toFixed(2)}</strong></div>
+            <div><span>Invested</span><strong>£${Number(data.balance.invested || 0).toFixed(2)}</strong></div>
+            <div><span>Profit</span><strong>£${Number(data.balance.profit || 0).toFixed(2)}</strong></div>
+          `;
+        } else {
+          balanceNode.innerHTML = '<p>Balance is hidden by privacy settings.</p>';
+        }
+
+        const badgeNode = document.getElementById('openAccountBadges');
+        const badges = data.badges || [];
+        badgeNode.innerHTML = badges.length
+          ? badges.map((badge) => `<div class="badge-card"><h4>${badge.label}</h4></div>`).join('')
+          : '<p>No badges yet.</p>';
+      }
+
+      document.addEventListener('DOMContentLoaded', loadOpenAccount);
+    </script>
+  </body>
+</html>

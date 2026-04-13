@@ -1,0 +1,67 @@
+{
+  "tiers": [
+    {"name": "Essential", "price": 19, "signals": 2, "desc": "A simple entry tier for traders who want a light daily signal flow."},
+    {"name": "Starter", "price": 39, "signals": 4, "desc": "More structure for users who want consistent market opportunities."},
+    {"name": "Core", "price": 69, "signals": 6, "desc": "Balanced coverage for active traders following multiple setups."},
+    {"name": "Pro", "price": 119, "signals": 8, "desc": "Built for users who want stronger coverage through the trading day."},
+    {"name": "Elite", "price": 189, "signals": 12, "desc": "High-volume signal access for serious market participants."},
+    {"name": "Apex", "price": 299, "signals": 16, "desc": "Maximum signal access with the highest level of visibility and priority."}
+  ],
+  "discordTagLevels": ["early_bird", "launch", "scaled", "premium", "final"],
+  "billingCycles": ["weekly", "monthly", "quarterly", "annual", "lifetime"],
+  "discordTagLabels": {
+    "early_bird": "Early Bird",
+    "launch": "Launch",
+    "scaled": "Scaled",
+    "premium": "Premium",
+    "final": "Final"
+  },
+  "pricingMatrixGbp": {
+    "1": {
+      "early_bird": {"weekly": 3.5, "monthly": 10, "quarterly": 30, "annual": 120, "lifetime": null},
+      "launch": {"weekly": 5, "monthly": 15, "quarterly": 40, "annual": 150, "lifetime": null},
+      "scaled": {"weekly": 7, "monthly": 20, "quarterly": 55, "annual": 180, "lifetime": null},
+      "premium": {"weekly": 10, "monthly": 30, "quarterly": 80, "annual": 250, "lifetime": null},
+      "final": {"weekly": 15, "monthly": 40, "quarterly": 110, "annual": 350, "lifetime": null}
+    },
+    "2": {
+      "early_bird": {"weekly": 6, "monthly": 18, "quarterly": 50, "annual": 180, "lifetime": null},
+      "launch": {"weekly": 8, "monthly": 25, "quarterly": 60, "annual": 220, "lifetime": null},
+      "scaled": {"weekly": 12, "monthly": 35, "quarterly": 85, "annual": 300, "lifetime": null},
+      "premium": {"weekly": 15, "monthly": 45, "quarterly": 120, "annual": 350, "lifetime": null},
+      "final": {"weekly": 22, "monthly": 65, "quarterly": 180, "annual": 500, "lifetime": null}
+    },
+    "3": {
+      "early_bird": {"weekly": 9, "monthly": 27, "quarterly": 65, "annual": 240, "lifetime": null},
+      "launch": {"weekly": 12, "monthly": 35, "quarterly": 85, "annual": 300, "lifetime": null},
+      "scaled": {"weekly": 16, "monthly": 50, "quarterly": 130, "annual": 380, "lifetime": null},
+      "premium": {"weekly": 20, "monthly": 60, "quarterly": 160, "annual": 450, "lifetime": null},
+      "final": {"weekly": 30, "monthly": 90, "quarterly": 260, "annual": 650, "lifetime": null}
+    },
+    "4": {
+      "early_bird": {"weekly": 12, "monthly": 35, "quarterly": 85, "annual": 300, "lifetime": 450},
+      "launch": {"weekly": 17, "monthly": 50, "quarterly": 120, "annual": 420, "lifetime": 600},
+      "scaled": {"weekly": 22, "monthly": 65, "quarterly": 160, "annual": 520, "lifetime": 750},
+      "premium": {"weekly": 30, "monthly": 85, "quarterly": 240, "annual": 600, "lifetime": 850},
+      "final": {"weekly": 45, "monthly": 125, "quarterly": 360, "annual": 850, "lifetime": 1150}
+    },
+    "5": {
+      "early_bird": {"weekly": 18, "monthly": 50, "quarterly": 120, "annual": 450, "lifetime": 650},
+      "launch": {"weekly": 25, "monthly": 70, "quarterly": 170, "annual": 580, "lifetime": 850},
+      "scaled": {"weekly": 35, "monthly": 100, "quarterly": 280, "annual": 720, "lifetime": 1000},
+      "premium": {"weekly": 45, "monthly": 125, "quarterly": 350, "annual": 800, "lifetime": 1150},
+      "final": {"weekly": 60, "monthly": 160, "quarterly": 450, "annual": 1100, "lifetime": 1500}
+    },
+    "6": {
+      "early_bird": {"weekly": 25, "monthly": 70, "quarterly": 160, "annual": 600, "lifetime": 850},
+      "launch": {"weekly": 35, "monthly": 90, "quarterly": 220, "annual": 750, "lifetime": 1000},
+      "scaled": {"weekly": 50, "monthly": 135, "quarterly": 360, "annual": 900, "lifetime": 1250},
+      "premium": {"weekly": 65, "monthly": 180, "quarterly": 500, "annual": 1100, "lifetime": 1500},
+      "final": {"weekly": 90, "monthly": 200, "quarterly": 550, "annual": 1400, "lifetime": 1800}
+    }
+  },
+  "promoPlansGbp": {
+    "starter": {"label": "Tier 1 Starter", "monthly": 19, "annual_monthly": 16, "annual_total": 192},
+    "business": {"label": "Business Starter", "monthly": 29, "annual_monthly": 24, "annual_total": 288}
+  }
+}

@@ -1,0 +1,157 @@
+<section id="community-hub-section" class="section visible community-hub-section">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">Community Hub</p>
+      <h2>Your account, global chat, whispers, and leaderboard</h2>
+      <p class="section-copy">Chat requires an active paid tier. Privacy mode hides your balance and removes you from leaderboards.</p>
+    </div>
+  </div>
+  <div class="community-hub-grid">
+    <article class="community-account-panel">
+      <div class="community-account-header">
+        <div class="community-account-avatar-container">
+          <img id="communityAvatar" class="community-avatar" src="/static/vaultsignals-logo.png" alt="Account avatar" />
+          <button id="avatarEditBtn" class="avatar-edit-btn" type="button" title="Click to change avatar">✎</button>
+          <input id="communityAvatarInput" class="hidden" type="url" />
+        </div>
+        <div class="community-account-info">
+          <p class="eyebrow">Account</p>
+          <div class="community-name-row">
+            <h3 id="communityDisplayName">Loading...</h3>
+            <span id="communityTierBadge" class="community-tier-badge">No Tier</span>
+          </div>
+          <p id="communityRankBadge" class="community-rank-badge">Rank: -</p>
+          <p class="community-account-subtitle">Shape your profile, control your privacy, and tune your community presence.</p>
+        </div>
+      </div>
+
+      <div class="community-balance-showcase">
+        <div class="balance-item">
+          <p class="balance-item-kicker">Portfolio</p>
+          <span>Balance</span>
+          <strong id="communityBalance">-</strong>
+        </div>
+        <div class="balance-item">
+          <p class="balance-item-kicker">Capital</p>
+          <span>Invested</span>
+          <strong id="communityInvested">-</strong>
+        </div>
+        <div class="balance-item">
+          <p class="balance-item-kicker">Performance</p>
+          <span>Profit</span>
+          <strong id="communityProfit">-</strong>
+        </div>
+      </div>
+
+      <div class="account-settings-section">
+        <h4>Account Settings</h4>
+        <form id="communitySettingsForm" class="community-settings-form">
+          <div class="settings-group">
+            <p class="settings-group-title">Profile</p>
+            <label>
+              <span>Display Name</span>
+              <input id="communityDisplayNameInput" type="text" maxlength="50" placeholder="How your name appears in chat" />
+            </label>
+          </div>
+
+          <div class="settings-group">
+            <p class="settings-group-title">Visibility</p>
+            <label class="community-checkbox-row">
+              <span class="community-checkbox-copy">
+                <strong>Show me on leaderboard</strong>
+                <span>Display your public results in the weekly and lifetime ranking tables.</span>
+              </span>
+              <span class="community-checkbox-control">
+                <input id="communityLeaderboardToggle" type="checkbox" checked />
+                <span class="community-checkbox-ui" aria-hidden="true"></span>
+              </span>
+            </label>
+            <label class="privacy-section-label">
+              <span>Privacy Mode</span>
+              <select id="communityPrivacyMode">
+                <option value="public">Public - Everyone sees your profile</option>
+                <option value="private">Private - Hide balance & remove from leaderboards</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="settings-group">
+            <p class="settings-group-title">Whisper Settings</p>
+            <label class="community-checkbox-row">
+              <span class="community-checkbox-copy">
+                <strong>Ignore whisper messages</strong>
+                <span>Keep the community hub read-only by muting private chats from other members.</span>
+              </span>
+              <span class="community-checkbox-control">
+                <input id="communityIgnoreWhisper" type="checkbox" />
+                <span class="community-checkbox-ui" aria-hidden="true"></span>
+              </span>
+            </label>
+          </div>
+
+          <button type="submit" class="primary-btn">Save Settings</button>
+        </form>
+        <div id="communitySettingsMessage" class="billing-message" aria-live="polite">Update your community profile and privacy.</div>
+      </div>
+    </article>
+
+    <article class="community-chat-panel">
+      <div class="community-tabs-header">
+        <button id="chatTabGlobal" class="tab-btn active" data-community-view="global" type="button">Global Chat</button>
+        <button id="chatTabWhisper" class="tab-btn" data-community-view="whisper" type="button">Whisper</button>
+        <button id="chatTabLeaderboard" class="tab-btn" data-community-view="leaderboard" type="button">Leaderboard</button>
+      </div>
+
+      <div id="chatContent" class="tab-content active">
+        <div id="communityChatMeta" class="community-chat-meta">Tier required to send messages.</div>
+        <div id="communityChatList" class="community-chat-list"></div>
+        <form id="communityChatForm" class="community-chat-form">
+          <input id="communityWhisperTarget" class="hidden" type="text" placeholder="Whisper username" spellcheck="false" />
+          <input id="communityChatInput" type="text" maxlength="600" placeholder="Type your message..." />
+          <button type="submit" class="primary-btn">Send</button>
+        </form>
+      </div>
+
+      <div id="leaderboardContent" class="tab-content">
+        <div class="community-leaderboard-controls">
+          <div class="leaderboard-scope-switch">
+            <button id="leaderboardWeekly" class="toggle-btn active" type="button">Weekly</button>
+            <button id="leaderboardLifetime" class="toggle-btn" type="button">Lifetime</button>
+          </div>
+        </div>
+        <div id="communityLeaderboardList" class="community-leaderboard-list"></div>
+        <div class="leaderboard-page-nav">
+          <button id="leaderboardPrev" class="leaderboard-nav-btn" type="button" aria-label="Previous page" disabled>&#8249;</button>
+          <span id="leaderboardSlideInfo" class="leaderboard-slide-info">Page 1 / 1</span>
+          <button id="leaderboardNext" class="leaderboard-nav-btn" type="button" aria-label="Next page">&#8250;</button>
+        </div>
+      </div>
+    </article>
+  </div>
+
+  <div id="userProfileModal" class="user-profile-modal hidden">
+    <div class="user-profile-modal-content">
+      <button class="modal-close-btn" type="button">✕</button>
+      <div class="user-profile-header">
+        <img id="userProfileAvatar" class="user-profile-avatar" src="/static/vaultsignals-logo.png" alt="User avatar" />
+        <div class="user-profile-info">
+          <h4 id="userProfileName">User</h4>
+          <p id="userProfileRank" class="user-profile-rank">Rank: -</p>
+          <p id="userProfileTier" class="user-profile-tier">Tier: -</p>
+        </div>
+      </div>
+      <div class="user-profile-actions">
+        <button id="addToNetworkBtn" class="action-btn network-btn" type="button">
+          <span>+</span> Add to Network
+        </button>
+        <button id="userCheckAccountBtn" class="action-btn account-btn" type="button">
+          <span>View</span> Check Account
+        </button>
+        <button id="userWhisperBtn" class="action-btn whisper-btn" type="button">
+          <span>Msg</span> Whisper
+        </button>
+      </div>
+      <div id="userProfileMessage" class="user-profile-message"></div>
+    </div>
+  </div>
+</section>

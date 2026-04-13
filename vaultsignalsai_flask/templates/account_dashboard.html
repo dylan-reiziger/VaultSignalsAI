@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VaultSignals</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='vaultsignals-logo.png') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body data-vat-rate="{{ ui_config.vat_rate }}" data-currency-symbol="{{ ui_config.currency_symbol }}" data-default-currency-code="{{ ui_config.default_currency_code }}">
+    <canvas id="marketCanvas"></canvas>
+    <div class="site-shell">
+      <div class="animated-bg">
+        <span class="glow glow-1"></span>
+        <span class="glow glow-2"></span>
+        <span class="glow glow-3"></span>
+        <div class="market-lines"></div>
+      </div>
+
+      <header class="navbar">
+        <div class="brand">
+          <div class="logo" aria-label="Vault Signals logo">
+            <img class="logo-img" src="{{ url_for('static', filename='vaultsignals-logo.png') }}" alt="Vault Signals logo" />
+          </div>
+          <div>
+            <p class="eyebrow">Premium Signals</p>
+            <h2 class="brand-title">VaultSignals</h2>
+          </div>
+        </div>
+
+        <nav class="nav-links" id="navLinks">
+          <a href="/">Home</a>
+          <a href="/price">Price</a>
+          <a class="hidden" data-member-portal-link href="/your-signals">Your Signals</a>
+          <a href="/about-us">About Us</a>
+          <a class="hidden nav-active" data-member-portal-link href="/account/dashboard#community-hub-section">Community</a>
+          <a class="hidden" data-member-portal-link href="/pro-mode" style="color:#a78bfa;font-weight:700;">⚡ Pro</a>
+          <a href="#feedback">Feedback</a>
+        </nav>
+
+        <div class="nav-actions">
+          <a class="bitvavo-btn" href="{{ ui_config.bitvavo_url }}" target="_blank" rel="noreferrer">Bitvavo</a>
+          <button class="ghost-btn nav-login-btn" data-login-trigger type="button">Log In</button>
+          <a href="/settings" class="nav-settings-btn" title="Settings" aria-label="Settings">⚙</a>
+          <button class="menu-btn" id="menuToggle" aria-label="Open menu">☰</button>
+        </div>
+      </header>
+
+      <main>
+        <section class="account-tabs-shell" aria-label="Account navigation">
+          <nav class="account-tabs-nav" id="accountTabsNav">
+            <a class="account-tab-link is-active" href="#account-overview-section">Overview</a>
+            <a class="account-tab-link" href="#account-badges-section">Achievements</a>
+            <a class="account-tab-link" href="#account-purchases-section">Subscriptions</a>
+            <a class="account-tab-link" href="#account-transactions-section">Transaction History</a>
+            <a class="account-tab-link" href="#community-hub-section">Community Hub</a>
+            <a class="account-tab-link" href="/your-signals">Your Signals</a>
+            <a class="account-tab-link" href="/price">Pricing & Billing</a>
+            <a class="account-tab-link pro-tab-link" href="/pro-mode">⚡ Pro Mode</a>
+          </nav>
+        </section>
+
+        <!-- Loyalty Overview -->
+        <section id="account-overview-section" class="section visible">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Your Status</p>
+              <h2 id="accountWelcome">Loading account info...</h2>
+              <p class="section-copy" id="loyaltyDescription">View your membership details, badges, and achievements.</p>
+            </div>
+          </div>
+          <div class="loyalty-grid" id="loyaltyStats"></div>
+        </section>
+
+        <!-- Badges & Achievements -->
+        <section id="account-badges-section" class="section visible">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Achievements</p>
+              <h2>Your Badges</h2>
+            </div>
+          </div>
+          <div class="badges-grid" id="badgesContainer"></div>
+        </section>
+
+        <!-- Recent Purchases -->
+        <section id="account-purchases-section" class="section visible">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Subscriptions</p>
+              <h2>Recent Purchases</h2>
+            </div>
+          </div>
+          <div id="recentPurchasesContainer" class="purchases-list"></div>
+        </section>
+
+        <!-- Transaction History -->
+        <section id="account-transactions-section" class="section visible">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Financial</p>
+              <h2>Transaction History</h2>
+            </div>
+          </div>
+          <div id="transactionHistoryContainer" class="transactions-table"></div>
+        </section>
+
+        {% include 'sections/community_hub_section.html' %}
+
+        {% include 'sections/site_footer.html' %}
+      </main>
+    </div>
+
+    {% include 'auth_modal.html' %}
+    {% include 'feedback_modal.html' %}
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <script src="{{ url_for('static', filename='community.js') }}"></script>
+    <script>
+      // Load dashboard data
+      async function loadDashboard() {
+        try {
+          const response = await fetch('/api/member/dashboard');
+          if (!response.ok) {
+            window.location.href = '/';
+            return;
+          }
+          const data = await response.json();
+          renderDashboard(data);
+        } catch (error) {
+          console.error('Failed to load dashboard:', error);
+        }
+      }
+
+      function renderDashboard(data) {
+        const member = data.member;
+        const loyalty = data.loyalty;
+        
+        // Update welcome
+        document.getElementById('accountWelcome').textContent = `${member.fullName || member.username}, ${loyalty.loyaltyLevel.toUpperCase()} member`;
+        document.getElementById('loyaltyDescription').textContent = `Joined ${new Date(loyalty.customerSince).toLocaleDateString()} • ${loyalty.monthsActive} months active`;
+        
+        // Render loyalty stats
+        const loyaltyStatsHtml = `
+          <article class="panel-card loyalty-stat-card">
+            <span class="eyebrow">Member Since</span>
+            <h3>${new Date(loyalty.customerSince).toLocaleDateString()}</h3>
+            <p>Trusted for ${loyalty.monthsActive} month${loyalty.monthsActive !== 1 ? 's' : ''}</p>
+          </article>
+          <article class="panel-card loyalty-stat-card">
+            <span class="eyebrow">Total Investment</span>
+            <h3>£${loyalty.totalSpent.toFixed(2)}</h3>
+            <p>Signals purchased and unlocked</p>
+          </article>
+          <article class="panel-card loyalty-stat-card">
+            <span class="eyebrow">Loyalty Level</span>
+            <h3>${loyalty.loyaltyLevel.charAt(0).toUpperCase() + loyalty.loyaltyLevel.slice(1)}</h3>
+            <p>${getLoyaltyBenefit(loyalty.loyaltyLevel)}</p>
+          </article>
+          <article class="panel-card loyalty-stat-card">
+            <span class="eyebrow">Active Subscriptions</span>
+            <h3>${data.recentPurchases.filter(p => new Date(p.expiresAt) > new Date()).length}</h3>
+            <p>Current active tiers</p>
+          </article>
+        `;
+        document.getElementById('loyaltyStats').innerHTML = loyaltyStatsHtml;
+        
+        // Render badges
+        const badgesHtml = loyalty.badges.map(badge => `
+          <div class="badge-card">
+            <div class="badge-icon">${badge.icon}</div>
+            <h4>${badge.name}</h4>
+            <p>${badge.achievement}</p>
+            ${badge.bonus ? `<span class="bonus-tag">${badge.bonus}</span>` : ''}
+          </div>
+        `).join('');
+        document.getElementById('badgesContainer').innerHTML = badgesHtml || '<p>No badges yet. Keep trading!</p>';
+        
+        // Render recent purchases
+        const purchasesHtml = data.recentPurchases.length > 0 ? data.recentPurchases.map(purchase => `
+          <div class="purchase-item">
+            <div class="purchase-head">
+              <h4>${purchase.tierName}</h4>
+              <span class="purchase-date">${new Date(purchase.createdAt).toLocaleDateString()}</span>
+            </div>
+            <p class="purchase-expiry">Expires: ${new Date(purchase.expiresAt).toLocaleDateString()}</p>
+          </div>
+        `).join('') : '<p>No purchases yet.</p>';
+        document.getElementById('recentPurchasesContainer').innerHTML = purchasesHtml;
+        
+        // Render transaction history
+        const transactionsHtml = data.transactionHistory.length > 0 ? `
+          <table class="transactions-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Invoice</th>
+                <th>Type</th>
+                <th>Amount</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${data.transactionHistory.map(tx => `
+                <tr>
+                  <td>${new Date(tx.createdAt).toLocaleDateString()}</td>
+                  <td>${tx.invoiceNumber || '-'}</td>
+                  <td>${tx.type}</td>
+                  <td>£${tx.amount.toFixed(2)}</td>
+                  <td><span class="status-badge status-${tx.status}">${tx.status}</span></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        ` : '<p>No transactions yet.</p>';
+        document.getElementById('transactionHistoryContainer').innerHTML = transactionsHtml;
+      }
+
+      function getLoyaltyBenefit(level) {
+        const benefits = {
+          bronze: 'Get started with signals',
+          silver: '+3 months bonus on the first month',
+          gold: '+1 week bonus per purchase',
+          diamond: 'VIP access + dedicated support',
+        };
+        return benefits[level] || 'Keep earning rewards';
+      }
+
+      // Load on page load
+      function setupAccountTabs() {
+        const tabs = Array.from(document.querySelectorAll('.account-tab-link[href^="#"]'));
+        const sections = tabs
+          .map((tab) => document.querySelector(tab.getAttribute('href')))
+          .filter(Boolean);
+
+        function setActiveByHash() {
+          const hash = window.location.hash;
+          if (!hash) return;
+          tabs.forEach((tab) => tab.classList.toggle('is-active', tab.getAttribute('href') === hash));
+        }
+
+        const observer = new IntersectionObserver(
+          (entries) => {
+            const visible = entries
+              .filter((entry) => entry.isIntersecting)
+              .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+            if (!visible) return;
+            const id = `#${visible.target.id}`;
+            tabs.forEach((tab) => tab.classList.toggle('is-active', tab.getAttribute('href') === id));
+          },
+          { rootMargin: '-35% 0px -55% 0px', threshold: [0.15, 0.35, 0.6] }
+        );
+
+        sections.forEach((section) => observer.observe(section));
+        window.addEventListener('hashchange', setActiveByHash);
+        setActiveByHash();
+      }
+
+      document.addEventListener('DOMContentLoaded', () => {
+        loadDashboard();
+        setupAccountTabs();
+      });
+    </script>
+  </body>
+</html>

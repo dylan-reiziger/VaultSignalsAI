@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VaultSignals</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='vaultsignals-logo.png') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body data-vat-rate="{{ ui_config.vat_rate }}" data-currency-symbol="{{ ui_config.currency_symbol }}" data-default-currency-code="{{ ui_config.default_currency_code }}">
+    <canvas id="marketCanvas"></canvas>
+    <div class="site-shell">
+      <div class="animated-bg">
+        <span class="glow glow-1"></span>
+        <span class="glow glow-2"></span>
+        <span class="glow glow-3"></span>
+        <div class="market-lines"></div>
+      </div>
+
+      <header class="navbar">
+        <div class="brand">
+          <div class="logo" aria-label="Vault Signals logo">
+            <img class="logo-img" src="{{ url_for('static', filename='vaultsignals-logo.png') }}" alt="Vault Signals logo" />
+          </div>
+          <div>
+            <p class="eyebrow">Premium Signals</p>
+            <h2 class="brand-title">VaultSignals</h2>
+          </div>
+        </div>
+
+        <nav class="nav-links" id="navLinks">
+          <a href="/">Home</a>
+          <a href="/your-signals">Your Signals</a>
+          <a href="/admin/signals">Admin Signals</a>
+        </nav>
+
+        <div class="nav-actions">
+          <a class="bitvavo-btn" href="{{ ui_config.bitvavo_url }}" target="_blank" rel="noreferrer">Bitvavo</a>
+          <button class="menu-btn" id="menuToggle" aria-label="Open menu">☰</button>
+        </div>
+      </header>
+
+      <main>
+        {% if access_denied %}
+        <section class="section visible">
+          <article class="panel-card">
+            <h2>Admin Access Required</h2>
+            <p>{% if denied_reason == 'login' %}You need to log in with an admin account to open this page.{% else %}Your account does not have admin permissions.{% endif %}</p>
+            <a class="primary-btn" href="/">Return Home</a>
+          </article>
+        </section>
+        {% else %}
+        <section class="section visible">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Publish Workflow</p>
+              <h2>Create and publish daily signals</h2>
+              <p class="section-copy">Draft signals can be prepared first, then switched to published when ready for clients.</p>
+            </div>
+          </div>
+
+          <article class="panel-card">
+            <form id="adminSignalForm" class="admin-signal-form">
+              <input id="adminEditingSignalId" type="hidden" value="" />
+              <div class="admin-grid">
+                <label>Day<input id="adminSignalDay" type="date" value="{{ selected_day }}" required /></label>
+                <label>Tier<select id="adminTier" required><option value="1">Tier 1</option><option value="2">Tier 2</option><option value="3">Tier 3</option><option value="4">Tier 4</option><option value="5">Tier 5</option><option value="6">Tier 6</option></select></label>
+                <label>Asset<input id="adminAsset" type="text" placeholder="BTC" required /></label>
+                <label>Market<input id="adminMarket" type="text" placeholder="Bitcoin" required /></label>
+                <label>Direction<select id="adminDirection" required><option value="Long">Long</option><option value="Short">Short</option></select></label>
+                <label>Status<select id="adminStatus" required><option value="draft">Draft</option><option value="published" selected>Published</option><option value="archived">Archived</option></select></label>
+                <label>Entry<input id="adminEntry" type="number" step="0.0001" required /></label>
+                <label>Target<input id="adminTarget" type="number" step="0.0001" required /></label>
+                <label>Stop<input id="adminStop" type="number" step="0.0001" required /></label>
+                <label>Confidence<input id="adminConfidence" type="text" placeholder="Core" required /></label>
+                <label>Session<input id="adminSession" type="text" placeholder="US Open" required /></label>
+              </div>
+              <label>Thesis<textarea id="adminThesis" rows="3" required></textarea></label>
+              <div class="admin-actions-row">
+                <button id="adminSubmitBtn" class="primary-btn" type="submit">Create Signal</button>
+                <button id="adminCancelEditBtn" class="ghost-btn" type="button" hidden>Cancel Edit</button>
+                <button id="adminRefreshBtn" class="ghost-btn" type="button">Refresh Day</button>
+              </div>
+            </form>
+            <div id="adminSignalMessage" class="message-box">Manage your daily signal feed here.</div>
+          </article>
+        </section>
+
+        <section class="section visible">
+          <article class="panel-card">
+            <h3>Signals for selected day</h3>
+            <div id="adminSignalsTable" class="admin-signals-table"></div>
+          </article>
+        </section>
+        {% endif %}
+      </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    {% if not access_denied %}
+    <script src="{{ url_for('static', filename='admin_signals.js') }}"></script>
+    {% endif %}
+  </body>
+</html>

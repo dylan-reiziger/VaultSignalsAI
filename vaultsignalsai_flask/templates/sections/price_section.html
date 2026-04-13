@@ -1,0 +1,22 @@
+<section class="section tab-panel" id="priceSection">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">Pricing</p>
+      <h2>Choose the VaultSignalsAI experience</h2>
+      <p class="section-copy">Higher tiers unlock more signals per day and stronger premium coverage plus custom portfolio support.</p>
+    </div>
+  </div>
+
+  <div class="plans-grid">
+    {% for tier in tiers %}
+    <article class="tier-card {% if tier.name == 'Pro' %}featured{% endif %}">
+      {% if tier.name == 'Pro' %}<div class="badge">Most Popular</div>{% endif %}
+      <h3>{{ tier.name }}</h3>
+      <p class="tier-signals">{{ tier.signals }} signals / day</p>
+      <div class="tier-price">${{ tier.price }} <span>/ month</span></div>
+      <p class="tier-desc">{{ tier.desc }}</p>
+      <button class="tier-btn" data-tier="{{ tier.name }}">Unlock {{ tier.name }} (Includes: {{ tier.desc }})</button>
+    </article>
+    {% endfor %}
+  </div>
+</section>

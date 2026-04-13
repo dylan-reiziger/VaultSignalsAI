@@ -1,0 +1,36 @@
+<div id="feedbackModal" class="modal hidden" aria-hidden="true">
+  <div class="modal-content feedback-modal-card">
+    <button id="feedbackModalClose" class="modal-close" aria-label="Close feedback form">×</button>
+    <p class="feedback-kicker">Client Feedback</p>
+    <h3>Help us sharpen your trading edge</h3>
+    <p class="feedback-intro">Tell us what is missing, unclear, or slowing you down so we can improve the platform faster.</p>
+    <form id="feedbackForm" class="feedback-form">
+      <div class="feedback-grid">
+        <div class="feedback-field">
+          <label for="feedbackEmail">Email address</label>
+          <input id="feedbackEmail" type="email" name="email" required placeholder="you@example.com" />
+        </div>
+        <div class="feedback-field">
+          <label for="feedbackTopic">Topic</label>
+          <input id="feedbackTopic" type="text" name="topic" required placeholder="e.g. pricing, signals, UI" />
+        </div>
+      </div>
+      <div class="feedback-field">
+        <label for="feedbackQuestion">Question or suggestion</label>
+        <textarea id="feedbackQuestion" name="question" rows="4" required placeholder="What should we improve first?"></textarea>
+        <button id="feedbackSubmitBtn" class="submit-btn feedback-submit-btn" type="submit">Send Feedback</button>
+      </div>
+      <p id="feedbackMessage" class="message-box feedback-message"></p>
+    </form>
+    <div class="feedback-contact-row">
+      <a class="feedback-contact-card" href="tel:{{ ui_config.feedback_phone_number }}" aria-label="Call VaultSignalsAI call center at {{ ui_config.feedback_phone_number }}">
+        <span class="feedback-contact-label">Call Center</span>
+        <span class="feedback-contact-value">{{ ui_config.feedback_phone_display }}</span>
+      </a>
+      <a class="feedback-contact-card" href="mailto:{{ ui_config.feedback_contact_email }}?subject=VaultSignalsAI%20Feedback" aria-label="Email VaultSignals at {{ ui_config.feedback_contact_email }}">
+        <span class="feedback-contact-label">Email Us</span>
+        <span class="feedback-contact-value">{{ ui_config.feedback_contact_email }}</span>
+      </a>
+    </div>
+  </div>
+</div>

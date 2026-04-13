@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VaultSignals</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='vaultsignals-logo.png') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body data-vat-rate="{{ ui_config.vat_rate }}" data-currency-symbol="{{ ui_config.currency_symbol }}" data-default-currency-code="{{ ui_config.default_currency_code }}">
+    <canvas id="marketCanvas"></canvas>
+    <div class="site-shell">
+      <div class="animated-bg">
+        <span class="glow glow-1"></span>
+        <span class="glow glow-2"></span>
+        <span class="glow glow-3"></span>
+        <div class="market-lines"></div>
+      </div>
+
+      <header class="navbar">
+        <div class="brand">
+          <div class="logo" aria-label="Vault Signals logo">
+            <img class="logo-img" src="{{ url_for('static', filename='vaultsignals-logo.png') }}" alt="Vault Signals logo" />
+          </div>
+          <div>
+            <p class="eyebrow">Premium Signals</p>
+            <h2 class="brand-title">VaultSignals</h2>
+          </div>
+        </div>
+
+        <nav class="nav-links" id="navLinks">
+          <a href="/">Home</a>
+          <a href="/price">Price</a>
+          <a class="hidden" data-member-portal-link href="/your-signals">Your Signals</a>
+          <a href="/about-us" class="nav-active">About Us</a>
+          <a class="hidden" data-member-portal-link href="/account/dashboard#community-hub-section">Community</a>
+          <a href="#feedback">Feedback</a>
+        </nav>
+
+        <div class="nav-actions">
+          <a class="bitvavo-btn" href="{{ ui_config.bitvavo_url }}" target="_blank" rel="noreferrer">Bitvavo</a>
+          <button class="ghost-btn nav-login-btn" data-login-trigger type="button">Log In</button>
+          <a href="/settings" class="nav-settings-btn" title="Settings" aria-label="Settings">⚙</a>
+          <button class="menu-btn" id="menuToggle" aria-label="Open menu">☰</button>
+        </div>
+      </header>
+
+      <main>
+        <section class="section">
+          <div class="section-heading">
+            <div class="title-row">
+              <p class="eyebrow">About Us</p>
+              <h2>Meet VaultSignalsAI</h2>
+            </div>
+            <p class="section-copy">VaultSignalsAI is built for traders and investors who want faster market clarity, stronger structure, and signals backed by a disciplined research process instead of random hype.</p>
+          </div>
+          <div class="stats">
+            <article class="stat-card">
+              <strong>24/7</strong>
+              <span>Market monitoring across fast-moving crypto conditions.</span>
+            </article>
+            <article class="stat-card">
+              <strong>AI + Human</strong>
+              <span>Research filtered through models, market structure, and operator review.</span>
+            </article>
+            <article class="stat-card">
+              <strong>Client-first</strong>
+              <span>Built to improve confidence, planning, and execution quality.</span>
+            </article>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="feature-grid">
+            <article class="panel-card">
+              <h3>Who we are</h3>
+              <p>We are a combination of crypto traders, data analysts, and systems builders focused on identifying quality setups and turning market noise into structured opportunities.</p>
+            </article>
+            <article class="panel-card">
+              <h3>What we do</h3>
+              <p>We combine price action, momentum, liquidity behavior, token flow, and AI-assisted screening into signal alerts that are easier to act on and easier to understand.</p>
+            </article>
+            <article class="panel-card">
+              <h3>How we work</h3>
+              <p>Our process is built around filtering, confirmation, and risk context so members do not just receive an alert, but a more complete framework for decision-making.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="split-section">
+            <article class="panel-card">
+              <p class="eyebrow">Client Value</p>
+              <h3>What we can do for clients</h3>
+              <p>We are not only delivering entries on a chart. We help clients save time, reduce emotional decision-making, and operate with a clearer structure in markets that move quickly.</p>
+              <div class="mapping-list">
+                <div>
+                  <strong>Signal delivery</strong>
+                  <span>Trade ideas with clearer context</span>
+                </div>
+                <div>
+                  <strong>Risk framing</strong>
+                  <span>Better awareness before taking exposure</span>
+                </div>
+                <div>
+                  <strong>Market filtering</strong>
+                  <span>Less noise and fewer low-quality setups</span>
+                </div>
+                <div>
+                  <strong>Ongoing support</strong>
+                  <span>A more guided member experience</span>
+                </div>
+              </div>
+            </article>
+
+            <article class="panel-card trading-card">
+              <p class="eyebrow">What Clients Receive</p>
+              <h3>A more complete trading support layer</h3>
+              <p>Depending on the plan and the client profile, VaultSignalsAI can support short-term traders, active members, and serious clients who want a more professional signal environment.</p>
+              <div class="hero-details">
+                <ul>
+                  <li>High-probability crypto signal ideas with structured setup logic</li>
+                  <li>Cleaner market summaries to help interpret the broader environment</li>
+                  <li>More consistent coverage on active opportunities and stronger tiers</li>
+                  <li>A service built to grow from simple alerts into a smarter client experience</li>
+                </ul>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Use Cases</p>
+              <h2>How we support different clients</h2>
+            </div>
+            <p class="section-copy">Our service is designed to be useful whether someone is looking for faster alerts, more structure, or a more premium decision-support layer around crypto trading.</p>
+          </div>
+          <div class="feature-grid">
+            <article class="panel-card">
+              <h3>For newer traders</h3>
+              <p>We help reduce confusion by highlighting better setups and presenting opportunities in a more organized way than scattered social media calls.</p>
+            </article>
+            <article class="panel-card">
+              <h3>For active traders</h3>
+              <p>We help save research time by narrowing the market to cleaner opportunities with better timing, clearer momentum, and more actionable structure.</p>
+            </article>
+            <article class="panel-card">
+              <h3>For premium clients</h3>
+              <p>We can evolve beyond signals into a more refined service experience with stronger coverage, better support, and more tailored market guidance over time.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="banner-card panel-card">
+            <div>
+              <p class="eyebrow">Vision</p>
+              <h3>We want VaultSignalsAI to become more than a signal page</h3>
+              <p>Our direction is to keep building a stronger client platform around crypto intelligence, signal quality, market context, and a premium member experience that can scale with serious users.</p>
+            </div>
+            <a class="primary-btn" href="/price">View Membership Options</a>
+          </div>
+        </section>
+        {% include 'sections/site_footer.html' %}
+      </main>
+    </div>
+
+    {% include 'auth_modal.html' %}
+    {% include 'feedback_modal.html' %}
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+  </body>
+</html>
