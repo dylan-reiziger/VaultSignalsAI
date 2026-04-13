@@ -1,9 +1,9 @@
 <section class="hero tab-panel active" id="homeSection">
   <div class="hero-layout">
-    <div class="hero-copy">
+    <div class="hero-copy hero-copy-primary">
       <div class="pill">AI-powered market intelligence for premium signal traders</div>
       <div class="hero-kicker-row">
-        <span class="hero-kicker-chip">Live desk coverage</span>
+        <span class="hero-kicker-chip">Market coverage</span>
         <span class="hero-kicker-chip">Risk-first entries</span>
         <span class="hero-kicker-chip">BTC ETH SOL focus</span>
       </div>
@@ -18,7 +18,9 @@
         <button class="primary-btn large-btn" data-login-trigger type="button">Create Account</button>
         <a class="large-btn alt hero-alt-cta" href="/price">Explore Plans</a>
       </div>
+    </div>
 
+    <div class="hero-copy hero-copy-secondary">
       <div class="trusted-by">
         <p>Trusted by</p>
         <div class="trusted-logos">
@@ -41,7 +43,7 @@
           <span>High-frequency idea flow for active members.</span>
         </div>
         <div class="stat-card">
-          <span class="stat-card-label">Desk coverage</span>
+          <span class="stat-card-label">Market coverage</span>
           <strong>24/7</strong>
           <span>Market-aware presence across sessions and volatility.</span>
         </div>
@@ -64,79 +66,5 @@
         </ul>
       </div>
     </div>
-
-    <aside class="hero-terminal panel-card">
-      <div class="hero-terminal-head">
-        <div>
-          <p class="eyebrow">Live Desk</p>
-          <h3>Major Crypto Radar</h3>
-        </div>
-        <span class="hero-terminal-status" id="liveDeskFeedStatus">Loading feed</span>
-      </div>
-
-      <div class="hero-terminal-grid">
-        <article class="hero-terminal-tile">
-          <span class="hero-terminal-tile-label">Majors tracked</span>
-          <strong id="liveDeskTrackedCount">--</strong>
-          <p>Higher-cap coins loaded into the live desk.</p>
-        </article>
-        <article class="hero-terminal-tile">
-          <span class="hero-terminal-tile-label">Largest market cap</span>
-          <strong id="liveDeskMarketLeader">--</strong>
-          <p id="liveDeskMarketLeaderMeta">The market leader will load here.</p>
-        </article>
-        <article class="hero-terminal-tile">
-          <span class="hero-terminal-tile-label">Feed mode</span>
-          <strong id="liveDeskFeedMode">--</strong>
-          <p id="liveDeskFeedModeMeta">Server-side feed with backend key support.</p>
-        </article>
-      </div>
-
-      <div class="hero-terminal-coin-picks" id="liveDeskCoins">
-        <div class="hero-terminal-empty">Loading major crypto markets...</div>
-      </div>
-
-      <div class="hero-live-chart-card">
-        <div class="hero-live-chart-head">
-          <div>
-            <span class="hero-terminal-label">Most valuable crypto 24H chart</span>
-            <h4 id="liveDeskSelectedName">Loading...</h4>
-            <p id="liveDeskSelectedMeta">Top market-cap 24H chart will render here.</p>
-          </div>
-          <div class="hero-live-chart-pricebox">
-            <strong id="liveDeskSelectedPrice">--</strong>
-            <span class="hero-live-chart-change" id="liveDeskSelectedChange">--</span>
-          </div>
-        </div>
-
-        <div class="hero-live-chart-wrap">
-          <svg id="liveDeskChart" class="hero-live-chart" viewBox="0 0 640 220" preserveAspectRatio="none" role="img" aria-label="Live crypto chart"></svg>
-        </div>
-
-        <div class="hero-live-chart-stats">
-          <div>
-            <span>Market cap</span>
-            <strong id="liveDeskMarketCap">--</strong>
-          </div>
-          <div>
-            <span>24h volume</span>
-            <strong id="liveDeskVolume">--</strong>
-          </div>
-          <div>
-            <span>24h high</span>
-            <strong id="liveDeskHigh">--</strong>
-          </div>
-          <div>
-            <span>24h low</span>
-            <strong id="liveDeskLow">--</strong>
-          </div>
-        </div>
-      </div>
-
-      <div class="hero-terminal-actions">
-        <a class="ghost-btn" href="/pro-mode">Open Pro Mode</a>
-        <a class="ghost-btn" href="/your-signals">Member Feed</a>
-      </div>
-    </aside>
   </div>
 </section>

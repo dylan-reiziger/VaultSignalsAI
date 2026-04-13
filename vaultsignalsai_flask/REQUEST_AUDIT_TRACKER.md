@@ -11,8 +11,8 @@ This file tracks feature requests and quality-audit checkpoints.
 
 ## Current Cycle
 - Cycle start: Request 6
-- Current count: 4/5
-- Next full audit at: 5/5
+- Current count: 5/5
+- Next full audit at: completed in request 10
 
 ## Request Log
 1. Workflow setup: created request audit tracker and enabled 5-request quality checkpoints.
@@ -24,6 +24,7 @@ This file tracks feature requests and quality-audit checkpoints.
 7. Manual token verification UX: added verify-token API and auth-modal token input/button for local no-SMTP verification.
 8. Removed email verification requirement: new accounts are active immediately and login no longer blocks on verified status.
 9. Forced verified-state compatibility: backfilled existing accounts and enforced verified=1 at the database layer to neutralize stale verification gating.
+10. Full repo audit and hardening: centralized SMTP and billing config, removed redundant transaction commits, standardized purchase timestamps, hardened payment/request validation, and reran runtime checks.
 
 ## Full Audit Result - Request 5
 - Static error scan: clean for Python and frontend files touched in this cycle.
@@ -31,6 +32,13 @@ This file tracks feature requests and quality-audit checkpoints.
 - Wiring check: signup endpoint, auth frontend parsing, and local verification flow verified.
 - Runtime sanity check: Flask booted on 127.0.0.1:5000 and /api/session returned 200.
 - Outcome: account creation now returns 201 successfully on the existing local database.
+
+## Full Audit Result - Request 10
+- Static error scan: clean for Python, JS, CSS, and template files after hardening changes.
+- Hardcoded-value review: centralized SMTP, billing-cycle durations, loyalty thresholds, renewal lead days, and community rank mapping.
+- Robustness review: removed redundant `conn.commit()` calls, replaced silent migration failure handling with logging, and hardened PayPal/request JSON validation.
+- Timestamp review: standardized new purchase/reminder timestamps to database format while keeping ISO parsing backward compatible.
+- Runtime sanity check: Flask `test_client()` returned `200` for `/`, `/price`, and `/api/session`; timestamp helpers and tier/rank config loaded correctly.
 
 ## Full Audit Template (every 5th request)
 - [ ] Run static error scan for Python, JS, CSS, and templates.

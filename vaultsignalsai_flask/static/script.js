@@ -574,14 +574,16 @@ function renderLiveDesk() {
   const selectedCoin = state.liveDesk.selectedCoin || topCoins[0] || null;
   const leaderCoin = topCoins[0] || null;
   const source = state.liveDesk.source || {};
+  const providerLabel = String(source.provider || 'Market').trim();
+  const marketCapPrefix = source.estimatedMarketCap ? 'Est. market cap' : 'Top market cap';
 
   if (liveDeskFeedStatus) {
     const hasApiKey = Boolean(source.apiKeyConfigured);
     const isFallback = Boolean(source.fallback);
     const isLive = Boolean(source.liveStreamActive);
     liveDeskFeedStatus.textContent = isLive
-      ? '24H live stream'
-      : (isFallback ? '24H cached feed' : (hasApiKey ? '24H keyed feed' : '24H public feed'));
+      ? `${providerLabel} live stream`
+      : (isFallback ? `${providerLabel} cached feed` : (hasApiKey ? `${providerLabel} keyed feed` : `${providerLabel} public feed`));
     liveDeskFeedStatus.classList.toggle('is-keyed', isLive || (hasApiKey && !isFallback));
     liveDeskFeedStatus.classList.toggle('is-public', !isLive && (!hasApiKey || isFallback));
   }
@@ -595,20 +597,22 @@ function renderLiveDesk() {
   }
 
   if (liveDeskMarketLeaderMeta) {
-    liveDeskMarketLeaderMeta.textContent = leaderCoin ? `Top market cap ${formatCompactMoney(leaderCoin.market_cap)}.` : 'The market leader will load here.';
+    liveDeskMarketLeaderMeta.textContent = leaderCoin
+      ? `${marketCapPrefix} ${formatCompactMoney(leaderCoin.market_cap)}.`
+      : 'The market leader will load here.';
   }
 
   if (liveDeskFeedMode) {
-    liveDeskFeedMode.textContent = source.liveStreamActive ? 'Streaming' : (source.apiKeyConfigured ? 'Keyed' : 'Public');
+    liveDeskFeedMode.textContent = source.liveStreamActive ? 'Streaming' : (source.apiKeyConfigured ? 'Keyed' : providerLabel);
   }
 
   if (liveDeskFeedModeMeta) {
     liveDeskFeedModeMeta.textContent = source.liveStreamActive
-      ? 'Server-sent events keep the desk updating live while the 24H chart stays open.'
+      ? `${providerLabel} server-sent events keep the desk updating live while the 24H chart stays open.`
       : source.fallback
-      ? 'Fallback mode keeps the desk visible using cached 24H market data.'
+      ? `${providerLabel} fallback keeps the desk visible with live ticker data and a real 24H chart.`
       : (source.apiKeyConfigured
-        ? 'CoinGecko feed is running through the backend key for the 24H desk.'
+        ? `${providerLabel} feed is running through the backend key for the 24H desk.`
         : 'Server-side CoinGecko feed without exposing keys in the browser.');
   }
 
@@ -616,7 +620,7 @@ function renderLiveDesk() {
     if (!topCoins.length) {
       liveDeskCoins.innerHTML = '<div class="hero-terminal-empty">No live major coins available right now.</div>';
     } else {
-      liveDeskCoins.innerHTML = topCoins.map((coin) => {
+      liveDeskCoins.innerHTML = topCoins.slice(0, 4).map((coin) => {
         const change = Number(coin.change || 0);
         const isActive = coin.id === state.liveDesk.selectedCoinId;
         return `
@@ -639,7 +643,9 @@ function renderLiveDesk() {
   }
 
   if (liveDeskSelectedMeta) {
-    liveDeskSelectedMeta.textContent = selectedCoin ? `${selectedCoin.symbol}/USD • 24H live chart • market cap rank #${selectedCoin.rank || '--'}` : 'Top market-cap 24H chart will render here.';
+    liveDeskSelectedMeta.textContent = selectedCoin
+      ? `${selectedCoin.symbol}/USD • ${providerLabel} 24H chart • rank #${selectedCoin.rank || '--'}`
+      : 'Top market-cap 24H chart will render here.';
   }
 
   if (liveDeskSelectedPrice) {
@@ -999,6 +1005,30 @@ async function handleLogout(event) {
   }
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function getSignalRiskRewardLabel(signal) {
+  const entry = Number(signal?.entryPrice || 0);
+  const target = Number(signal?.targetPrice || 0);
+  const stop = Number(signal?.stopPrice || 0);
+  if (!Number.isFinite(entry) || !Number.isFinite(target) || !Number.isFinite(stop)) {
+    return '--';
+  }
+  const reward = Math.abs(target - entry);
+  const risk = Math.abs(entry - stop);
+  if (reward <= 0 || risk <= 0) {
+    return '--';
+  }
+  return `${formatNumber(reward / risk, 2)}R`;
+}
+
 function renderSignalsPage(payload) {
   if (!signalsFeed || !signalsSummary || !signalsWelcome || !signalsEmpty) return;
 
@@ -1010,23 +1040,34 @@ function renderSignalsPage(payload) {
     return;
   }
 
-  signalsWelcome.textContent = `${payload.member.fullName || payload.member.username}, here are your active paid signals for today.`;
+  signalsWelcome.textContent = `Welcome back, ${payload.member.fullName || payload.member.username}. Here is your curated signal board for today.`;
   const portfolio = payload.portfolio || { purchases: [], signalsPerDay: 0, activeTiers: 0 };
+  const activeSignals = Array.isArray(payload.signals) ? payload.signals : [];
+  const purchasePills = Array.isArray(portfolio.purchases) && portfolio.purchases.length
+    ? portfolio.purchases.slice(0, 4).map((purchase) => `<span class="signal-summary-pill">${escapeHtml(purchase.tierName)}</span>`).join('')
+    : '<span class="signal-summary-pill signal-summary-pill--muted">No active paid tiers</span>';
+  const unlockedAssets = [...new Set(activeSignals.map((signal) => String(signal.assetSymbol || '').toUpperCase()).filter(Boolean))];
+  const marketPills = unlockedAssets.length
+    ? unlockedAssets.slice(0, 5).map((assetSymbol) => `<span class="signal-summary-pill signal-summary-pill--soft">${escapeHtml(assetSymbol)}</span>`).join('')
+    : '<span class="signal-summary-pill signal-summary-pill--soft">Waiting for unlocked setups</span>';
+  const currencyNote = escapeHtml(payload.currency?.privacyNote || 'Displayed in your selected member currency.');
   signalsSummary.innerHTML = `
-    <article class="panel-card signal-summary-card">
-      <span class="eyebrow">Account Access</span>
-      <h3>${portfolio.signalsPerDay || 0} signals / day</h3>
-      <p>${portfolio.activeTiers || 0} paid tier${portfolio.activeTiers === 1 ? '' : 's'} connected to this member account.</p>
+    <article class="panel-card signal-summary-card signal-summary-card--focus">
+      <span class="signal-summary-label">Unlocked flow</span>
+      <div class="signal-summary-value">${portfolio.signalsPerDay || 0}<small>signals/day</small></div>
+      <p class="signal-summary-copy">${portfolio.activeTiers || 0} paid tier${portfolio.activeTiers === 1 ? '' : 's'} currently attached to this member account.</p>
+      <div class="signal-summary-pills">${purchasePills}</div>
     </article>
     <article class="panel-card signal-summary-card">
-      <span class="eyebrow">Display Currency</span>
-      <h3>${payload.currency.code}</h3>
-      <p>${payload.currency.privacyNote}</p>
+      <span class="signal-summary-label">Active board</span>
+      <div class="signal-summary-value">${activeSignals.length}<small>setups live</small></div>
+      <p class="signal-summary-copy">${activeSignals.length ? 'Your unlocked signal flow is ready for quick review and route handoff.' : 'No setups are visible yet in this member view.'}</p>
+      <div class="signal-summary-pills">${marketPills}</div>
     </article>
-    <article class="panel-card signal-summary-card">
-      <span class="eyebrow">Trade Route</span>
-      <h3>Bitvavo</h3>
-      <p>Choose your market and open it directly from your signal feed.</p>
+    <article class="panel-card signal-summary-card signal-summary-card--route">
+      <span class="signal-summary-label">Display & route</span>
+      <div class="signal-summary-value">${escapeHtml(payload.currency.code)}<small>member currency</small></div>
+      <p class="signal-summary-copy">${currencyNote}</p>
       <div class="market-route-row">
         <select id="signalsMarketSelect" class="currency-select market-select" aria-label="Select crypto market">
           <option value="bitvavo">Bitvavo</option>
@@ -1039,38 +1080,66 @@ function renderSignalsPage(payload) {
   signalsMarketSelect = document.getElementById('signalsMarketSelect');
   openMarketBtn = document.getElementById('openMarketBtn');
   openMarketBtn?.addEventListener('click', () => {
-    const firstSignal = (payload.signals || [])[0];
+    const firstSignal = activeSignals[0];
     const symbol = firstSignal?.assetSymbol || 'btc';
     window.open(getBitvavoMarketUrl(symbol), '_blank', 'noopener,noreferrer');
   });
 
-  if (!payload.signals?.length) {
+  if (!activeSignals.length) {
     signalsFeed.innerHTML = '';
     signalsEmpty.classList.remove('hidden');
     return;
   }
 
   signalsEmpty.classList.add('hidden');
-  signalsFeed.innerHTML = payload.signals.map((signal) => `
-    <article class="panel-card member-signal-card">
-      <div class="member-signal-head">
-        <div>
-          <p class="eyebrow">Tier ${signal.tierNumber} · ${signal.sessionLabel}</p>
-          <h3>${signal.assetSymbol} ${signal.direction}</h3>
+  signalsFeed.innerHTML = activeSignals.map((signal) => {
+    const assetSymbol = escapeHtml(String(signal.assetSymbol || 'Asset').toUpperCase());
+    const direction = escapeHtml(signal.direction || 'Long');
+    const directionClass = String(signal.direction || 'long').toLowerCase() === 'short' ? 'is-short' : 'is-long';
+    const sessionLabel = escapeHtml(signal.sessionLabel || 'All-day session');
+    const marketLabel = escapeHtml(signal.market || `${assetSymbol}/USD`);
+    const confidenceLabel = escapeHtml(signal.confidenceLabel || 'Structured');
+    const thesis = escapeHtml(signal.thesis || 'No execution note provided.');
+    const statusLabel = escapeHtml(signal.status || 'published');
+    const riskRewardLabel = getSignalRiskRewardLabel(signal);
+
+    return `
+      <article class="panel-card member-signal-card">
+        <div class="member-signal-topline">
+          <span class="signal-tier-pill">Tier ${signal.tierNumber}</span>
+          <span class="signal-session-pill">${sessionLabel}</span>
+          <span class="signal-direction-pill ${directionClass}">${direction}</span>
         </div>
-        <span class="signal-confidence">${signal.confidenceLabel}</span>
-      </div>
-      <div class="member-signal-prices">
-        <div><span>Entry</span><strong>${formatCurrencyAmount(signal.entryPrice)}</strong></div>
-        <div><span>Target</span><strong>${formatCurrencyAmount(signal.targetPrice)}</strong></div>
-        <div><span>Stop</span><strong>${formatCurrencyAmount(signal.stopPrice)}</strong></div>
-      </div>
-      <p>${signal.thesis}</p>
-      <div class="member-signal-actions">
-        <a class="bitvavo-btn member-market-btn" href="${getBitvavoMarketUrl(signal.assetSymbol)}" target="_blank" rel="noreferrer">Trade ${signal.assetSymbol} on Bitvavo</a>
-      </div>
-    </article>
-  `).join('');
+        <div class="member-signal-head">
+          <div class="member-signal-title">
+            <h3>${assetSymbol}</h3>
+            <p>${marketLabel}</p>
+          </div>
+          <span class="signal-confidence">${confidenceLabel}</span>
+        </div>
+        <div class="member-signal-prices">
+          <div><span>Entry</span><strong>${formatCurrencyAmount(signal.entryPrice)}</strong></div>
+          <div><span>Target</span><strong>${formatCurrencyAmount(signal.targetPrice)}</strong></div>
+          <div><span>Stop</span><strong>${formatCurrencyAmount(signal.stopPrice)}</strong></div>
+        </div>
+        <div class="member-signal-meta">
+          <span class="signal-stat-pill">R:R ${riskRewardLabel}</span>
+          <span class="signal-stat-pill">${statusLabel}</span>
+          <span class="signal-stat-pill">Bitvavo route</span>
+        </div>
+        <div class="member-signal-thesis">
+          <span>Execution note</span>
+          <p>${thesis}</p>
+        </div>
+        <div class="member-signal-actions">
+          <a class="bitvavo-btn member-market-btn" href="${getBitvavoMarketUrl(signal.assetSymbol)}" target="_blank" rel="noreferrer">
+            <span>Open ${assetSymbol} on Bitvavo</span>
+            <span class="member-market-btn-meta">${sessionLabel}</span>
+          </a>
+        </div>
+      </article>
+    `;
+  }).join('');
 }
 
 async function loadMemberSignals() {
@@ -1104,27 +1173,52 @@ async function loadPurchaseTiers() {
 
 function renderPurchaseTiers(payload) {
   if (!purchaseTiers) return;
-  
-  purchaseTiers.innerHTML = payload.tiers.map((tier) => `
-    <article class="panel-card signal-tier-card">
-      <div class="tier-head">
-        <p class="eyebrow">${tier.tierName}</p>
-        <h3>${tier.signalsPerDay} signal${tier.signalsPerDay === 1 ? '' : 's'}/day</h3>
-      </div>
-      <p class="tier-description">${tier.description}</p>
-      <div class="tier-pricing">
-        <strong class="price">${payload.currency.symbol}${tier.displayPrice.toFixed(2)}</strong>
-        <span class="billing-cycle">/month</span>
-      </div>
-      <button class="primary-btn buy-tier-btn" data-tier-number="${tier.tierNumber}" type="button">
-        Buy Now
-      </button>
-    </article>
-  `).join('');
+  const tiers = Array.isArray(payload?.tiers) ? payload.tiers : [];
+  if (!tiers.length) {
+    purchaseTiers.innerHTML = `
+      <article class="panel-card member-empty-state">
+        <h3>No upgrade tiers available</h3>
+        <p>Pricing options will appear here when the tier catalogue is loaded.</p>
+      </article>
+    `;
+    return;
+  }
+
+  purchaseTiers.innerHTML = tiers.map((tier) => {
+    const tierName = escapeHtml(tier.tierName);
+    const description = escapeHtml(tier.description || 'Unlock a stronger signal flow for this member account.');
+    const signalsPerDay = Number(tier.signalsPerDay || 0);
+    const displayPrice = Number(tier.displayPrice || 0);
+    const priceLabel = `${escapeHtml(payload.currency.symbol)}${displayPrice.toFixed(2)}`;
+    return `
+      <article class="panel-card signal-tier-card">
+        <div class="tier-head">
+          <div>
+            <span class="tier-kicker">Tier ${tier.tierNumber}</span>
+            <h3>${tierName}</h3>
+          </div>
+          <span class="tier-density-pill">${signalsPerDay}/day</span>
+        </div>
+        <p class="tier-description">${description}</p>
+        <div class="tier-feature-list">
+          <span class="tier-feature-pill">${signalsPerDay} daily signal${signalsPerDay === 1 ? '' : 's'}</span>
+          <span class="tier-feature-pill">Member dashboard access</span>
+          <span class="tier-feature-pill">Direct market route</span>
+        </div>
+        <div class="tier-pricing">
+          <strong class="price">${priceLabel}</strong>
+          <span class="billing-cycle">per month</span>
+        </div>
+        <button class="primary-btn buy-tier-btn" data-tier-number="${tier.tierNumber}" type="button">
+          Unlock ${tierName}
+        </button>
+      </article>
+    `;
+  }).join('');
   
   // Add click handlers to buy buttons
   purchaseTiers.querySelectorAll('.buy-tier-btn').forEach((btn) => {
-    btn.addEventListener('click', () => handleBuyTier(payload.tiers, parseInt(btn.dataset.tierNumber)));
+    btn.addEventListener('click', () => handleBuyTier(tiers, parseInt(btn.dataset.tierNumber)));
   });
 }
 

@@ -120,6 +120,7 @@ def _load_json_file(path: Path, fallback: Any) -> Any:
 COINGECKO_BASE_URL = os.getenv("COINGECKO_BASE_URL", "https://api.coingecko.com/api/v3")
 COINGECKO_API_KEY = os.getenv("COINGECKO_API_KEY", "").strip()
 COINGECKO_API_KEY_HEADER = os.getenv("COINGECKO_API_KEY_HEADER", "x-cg-demo-api-key").strip() or "x-cg-demo-api-key"
+BITVAVO_BASE_URL = os.getenv("BITVAVO_BASE_URL", "https://api.bitvavo.com/v2").rstrip("/")
 STREAM_CRYPTO_IDS = _csv_env("STREAM_CRYPTO_IDS", "bitcoin,ethereum,cardano,solana,ripple")
 API_CRYPTO_IDS = _csv_env("API_CRYPTO_IDS", "bitcoin,ethereum")
 CANVAS_CRYPTO_IDS = _csv_env("CANVAS_CRYPTO_IDS", "bitcoin,ethereum,solana,ripple,cardano,binancecoin")
@@ -129,14 +130,33 @@ LIVE_DESK_CRYPTO_IDS = _csv_env(
 )
 LIVE_DESK_DEFAULT_COIN = os.getenv("LIVE_DESK_DEFAULT_COIN", "bitcoin").strip().lower() or "bitcoin"
 LIVE_DESK_CHART_POINT_LIMIT = int(os.getenv("LIVE_DESK_CHART_POINT_LIMIT", "40"))
+BITVAVO_ASSET_CATALOG: dict[str, dict[str, Any]] = {
+    "bitcoin": {"market": "BTC-EUR", "symbol": "BTC", "name": "Bitcoin", "rank": 1, "circulating_supply": 19_850_000},
+    "ethereum": {"market": "ETH-EUR", "symbol": "ETH", "name": "Ethereum", "rank": 2, "circulating_supply": 120_700_000},
+    "ripple": {"market": "XRP-EUR", "symbol": "XRP", "name": "XRP", "rank": 4, "circulating_supply": 58_500_000_000},
+    "binancecoin": {"market": "BNB-EUR", "symbol": "BNB", "name": "BNB", "rank": 5, "circulating_supply": 145_887_575},
+    "solana": {"market": "SOL-EUR", "symbol": "SOL", "name": "Solana", "rank": 6, "circulating_supply": 516_000_000},
+    "dogecoin": {"market": "DOGE-EUR", "symbol": "DOGE", "name": "Dogecoin", "rank": 8, "circulating_supply": 148_600_000_000},
+    "cardano": {"market": "ADA-EUR", "symbol": "ADA", "name": "Cardano", "rank": 9, "circulating_supply": 35_300_000_000},
+    "sui": {"market": "SUI-EUR", "symbol": "SUI", "name": "Sui", "rank": 13, "circulating_supply": 3_190_000_000},
+    "chainlink": {"market": "LINK-EUR", "symbol": "LINK", "name": "Chainlink", "rank": 14, "circulating_supply": 657_100_000},
+    "avalanche-2": {"market": "AVAX-EUR", "symbol": "AVAX", "name": "Avalanche", "rank": 15, "circulating_supply": 416_000_000},
+}
 MARKET_CACHE_TTL_SECONDS = int(os.getenv("MARKET_CACHE_TTL_SECONDS", "30"))
 DEFAULT_CURRENCY_CODE = os.getenv("APP_DEFAULT_CURRENCY_CODE", "GBP").strip().upper() or "GBP"
 CHECKOUT_VAT_RATE = _float_env("APP_VAT_RATE", 0.21)
+EMAIL_FROM = os.getenv("EMAIL_FROM", "no-reply@vaultsignalsai.com").strip() or "no-reply@vaultsignalsai.com"
+SMTP_HOST = os.getenv("SMTP_HOST", os.getenv("SMTP_SERVER", "localhost")).strip() or "localhost"
+SMTP_PORT = int(os.getenv("SMTP_PORT", "1025"))
+SMTP_USERNAME = os.getenv("SMTP_USERNAME", os.getenv("SMTP_USER", "")).strip()
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "").strip()
+SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "false").lower() in {"1", "true", "yes"}
+RENEWAL_REMINDER_LEAD_DAYS = int(os.getenv("RENEWAL_REMINDER_LEAD_DAYS", "7"))
 FEEDBACK_PHONE_NUMBER = os.getenv("FEEDBACK_PHONE_NUMBER", "+31625317922")
 FEEDBACK_PHONE_DISPLAY = os.getenv("FEEDBACK_PHONE_DISPLAY", "0625317922")
 FEEDBACK_CONTACT_EMAIL = os.getenv("FEEDBACK_CONTACT_EMAIL", "VaultSignals@AI.com")
 FEEDBACK_EMAIL = os.getenv("FEEDBACK_EMAIL", FEEDBACK_CONTACT_EMAIL)
-FEEDBACK_EMAIL_FROM = os.getenv("FEEDBACK_EMAIL_FROM", os.getenv("EMAIL_FROM", "no-reply@vaultsignalsai.com"))
+FEEDBACK_EMAIL_FROM = os.getenv("FEEDBACK_EMAIL_FROM", EMAIL_FROM)
 REMEMBER_COOKIE_NAME = os.getenv("APP_REMEMBER_COOKIE_NAME", "vaultsignals_remember")
 PREFERRED_CURRENCY_COOKIE_NAME = os.getenv("APP_CURRENCY_COOKIE_NAME", "vaultsignals_currency")
 REMEMBER_ME_DAYS = int(os.getenv("APP_REMEMBER_ME_DAYS", "30"))
@@ -184,6 +204,29 @@ DISCORD_TAG_LEVELS = PRICING_CATALOG.get("discordTagLevels", ["final"])
 BILLING_CYCLES = PRICING_CATALOG.get("billingCycles", ["monthly"])
 DISCORD_TAG_LABELS = PRICING_CATALOG.get("discordTagLabels", {"final": "Final"})
 PRICING_MATRIX_GBP = {int(tier): plans for tier, plans in (PRICING_CATALOG.get("pricingMatrixGbp", {}) or {}).items()}
+TIER_NUMBER_MIN = min(PRICING_MATRIX_GBP) if PRICING_MATRIX_GBP else 1
+TIER_NUMBER_MAX = max(PRICING_MATRIX_GBP) if PRICING_MATRIX_GBP else max(len(TIERS), 1)
+DEFAULT_BILLING_CYCLE = "monthly" if "monthly" in BILLING_CYCLES else (BILLING_CYCLES[0] if BILLING_CYCLES else "monthly")
+VALID_BILLING_CYCLES = set(BILLING_CYCLES or ["weekly", "monthly", "quarterly", "annual", "lifetime"]) or {"weekly", "monthly", "quarterly", "annual", "lifetime"}
+VALID_BILLING_CYCLES.add("lifetime")
+BILLING_CYCLE_DAYS = {
+    "weekly": int(os.getenv("BILLING_CYCLE_DAYS_WEEKLY", "7")),
+    "monthly": int(os.getenv("BILLING_CYCLE_DAYS_MONTHLY", "30")),
+    "quarterly": int(os.getenv("BILLING_CYCLE_DAYS_QUARTERLY", "90")),
+    "annual": int(os.getenv("BILLING_CYCLE_DAYS_ANNUAL", "365")),
+}
+COMMUNITY_RANK_NAMES = _csv_env("COMMUNITY_RANK_NAMES", "Starter,Trader,Pro,Expert,Elite,Vault Elite")
+COMMUNITY_RANK_BY_TIER = {
+    0: "",
+    **{index: label for index, label in enumerate(COMMUNITY_RANK_NAMES[:TIER_NUMBER_MAX], start=1)},
+}
+LOYALTY_MEMBER_BADGE_MONTHS = int(os.getenv("LOYALTY_MEMBER_BADGE_MONTHS", "1"))
+LOYALTY_TRUSTED_BADGE_MONTHS = int(os.getenv("LOYALTY_TRUSTED_BADGE_MONTHS", "6"))
+LOYALTY_VETERAN_BADGE_MONTHS = int(os.getenv("LOYALTY_VETERAN_BADGE_MONTHS", "12"))
+LOYALTY_SUPPORTER_SPEND_GBP = _float_env("LOYALTY_SUPPORTER_SPEND_GBP", 100.0)
+LOYALTY_LEVEL_SILVER_MONTHS = int(os.getenv("LOYALTY_LEVEL_SILVER_MONTHS", "3"))
+LOYALTY_LEVEL_GOLD_MONTHS = int(os.getenv("LOYALTY_LEVEL_GOLD_MONTHS", str(LOYALTY_TRUSTED_BADGE_MONTHS)))
+LOYALTY_LEVEL_DIAMOND_MONTHS = int(os.getenv("LOYALTY_LEVEL_DIAMOND_MONTHS", str(LOYALTY_VETERAN_BADGE_MONTHS)))
 DISCORD_VERIFICATION_PENDING = "pending"
 DISCORD_VERIFICATION_VERIFIED = "verified"
 DISCORD_VERIFICATION_NOT_CONNECTED = "not_connected"
@@ -285,11 +328,36 @@ def parse_db_timestamp(raw_value: str | None) -> datetime | None:
             return datetime.strptime(raw_value, fmt)
         except ValueError:
             continue
+    try:
+        parsed = datetime.fromisoformat(raw_value)
+        return parsed.astimezone(UTC).replace(tzinfo=None) if parsed.tzinfo else parsed
+    except ValueError:
+        pass
     return None
 
 
 def utc_now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+def format_db_timestamp(raw_value: datetime | None) -> str | None:
+    if raw_value is None:
+        return None
+    return raw_value.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def send_smtp_message(message: EmailMessage) -> bool:
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
+            if SMTP_USE_TLS:
+                server.starttls()
+            if SMTP_USERNAME and SMTP_PASSWORD:
+                server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            server.send_message(message)
+        return True
+    except Exception as exc:
+        logger.warning("Could not send email via SMTP (%s:%s): %s", SMTP_HOST, SMTP_PORT, exc)
+        return False
 
 
 def build_exchange_rate_url() -> str:
@@ -810,11 +878,11 @@ def build_badges_for_account(conn: sqlite3.Connection, account_id: int) -> list[
     ).fetchone()
     months_active = int((loyalty["months_active"] if loyalty else 0) or 0)
     total_spent = float((loyalty["total_spent_gbp"] if loyalty else 0) or 0)
-    if months_active >= 6:
+    if months_active >= LOYALTY_TRUSTED_BADGE_MONTHS:
         badges.append({"code": "trusted_6m", "label": "Trusted 6 Months"})
-    if months_active >= 12:
+    if months_active >= LOYALTY_VETERAN_BADGE_MONTHS:
         badges.append({"code": "veteran_12m", "label": "Veteran 12 Months"})
-    if total_spent >= 100:
+    if total_spent >= LOYALTY_SUPPORTER_SPEND_GBP:
         badges.append({"code": "supporter_100", "label": "Top Supporter"})
     return badges
 
@@ -881,6 +949,184 @@ def request_json_with_retry(
         except requests.RequestException:
             continue
     return None
+
+
+def convert_market_quote_amount(amount: Any, from_currency: str = "EUR", to_currency: str = "USD") -> float:
+    try:
+        numeric_amount = float(amount or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+    normalized_from = normalize_currency_code(from_currency)
+    normalized_to = normalize_currency_code(to_currency)
+    if normalized_from == normalized_to:
+        return numeric_amount
+
+    rates = get_exchange_rates()
+    from_rate = rates.get(normalized_from)
+    to_rate = rates.get(normalized_to)
+    if from_rate is None or to_rate is None or from_rate == 0:
+        return numeric_amount
+    return numeric_amount / float(from_rate) * float(to_rate)
+
+
+def get_bitvavo_assets(tracked_ids: list[str] | tuple[str, ...] | None = None) -> list[dict[str, Any]]:
+    resolved_ids = tracked_ids or list(BITVAVO_ASSET_CATALOG.keys())
+    assets: list[dict[str, Any]] = []
+    for raw_coin_id in resolved_ids:
+        coin_id = str(raw_coin_id or "").strip().lower()
+        asset = BITVAVO_ASSET_CATALOG.get(coin_id)
+        if asset is None:
+            continue
+        assets.append({"id": coin_id, **asset})
+    return assets
+
+
+def fetch_bitvavo_ticker_rows(markets: list[str] | None = None) -> list[dict[str, Any]]:
+    raw_payload = request_json_with_retry(
+        f"{BITVAVO_BASE_URL}/ticker/24h",
+        {},
+        timeout=REQUEST_TIMEOUT_SECONDS,
+        retries=REQUEST_RETRIES,
+    )
+    if not isinstance(raw_payload, list):
+        return []
+
+    if not markets:
+        return [row for row in raw_payload if isinstance(row, dict)]
+
+    market_set = {str(market or "").strip().upper() for market in markets}
+    return [
+        row
+        for row in raw_payload
+        if isinstance(row, dict) and str(row.get("market", "")).strip().upper() in market_set
+    ]
+
+
+def build_bitvavo_market_coin(asset: dict[str, Any], ticker_row: dict[str, Any]) -> dict[str, Any]:
+    try:
+        last_price_eur = float(ticker_row.get("last") or 0)
+    except (TypeError, ValueError):
+        last_price_eur = 0.0
+    try:
+        open_price_eur = float(ticker_row.get("open") or last_price_eur or 0)
+    except (TypeError, ValueError):
+        open_price_eur = last_price_eur
+    try:
+        high_price_eur = float(ticker_row.get("high") or last_price_eur or 0)
+    except (TypeError, ValueError):
+        high_price_eur = last_price_eur
+    try:
+        low_price_eur = float(ticker_row.get("low") or last_price_eur or 0)
+    except (TypeError, ValueError):
+        low_price_eur = last_price_eur
+    try:
+        volume_quote_eur = float(ticker_row.get("volumeQuote") or 0)
+    except (TypeError, ValueError):
+        volume_quote_eur = 0.0
+
+    change_pct = ((last_price_eur - open_price_eur) / open_price_eur * 100) if open_price_eur > 0 else 0.0
+    price_usd = convert_market_quote_amount(last_price_eur, "EUR", "USD")
+    high_usd = convert_market_quote_amount(high_price_eur, "EUR", "USD")
+    low_usd = convert_market_quote_amount(low_price_eur, "EUR", "USD")
+    volume_usd = convert_market_quote_amount(volume_quote_eur, "EUR", "USD")
+    circulating_supply = float(asset.get("circulating_supply") or 0)
+    market_cap_usd = price_usd * circulating_supply if circulating_supply > 0 else 0.0
+
+    return format_live_desk_coin(
+        {
+            "id": asset.get("id", ""),
+            "symbol": asset.get("symbol", ""),
+            "pair": f"{asset.get('symbol', '')}/USD",
+            "name": asset.get("name", ""),
+            "price": price_usd,
+            "change": change_pct,
+            "market_cap": market_cap_usd,
+            "volume": volume_usd,
+            "rank": int(asset.get("rank") or 0),
+            "high_24h": high_usd,
+            "low_24h": low_usd,
+            "market_cap_change_24h": change_pct,
+        }
+    )
+
+
+def build_bitvavo_market_rows(tracked_ids: list[str] | tuple[str, ...] | None = None) -> list[dict[str, Any]]:
+    assets = get_bitvavo_assets(tracked_ids)
+    if not assets:
+        return []
+
+    ticker_rows = fetch_bitvavo_ticker_rows([str(asset.get("market", "")) for asset in assets])
+    ticker_by_market = {
+        str(row.get("market", "")).strip().upper(): row
+        for row in ticker_rows
+        if isinstance(row, dict)
+    }
+
+    rows: list[dict[str, Any]] = []
+    for asset in assets:
+        market = str(asset.get("market", "")).strip().upper()
+        ticker_row = ticker_by_market.get(market)
+        if ticker_row is None:
+            continue
+        rows.append(build_bitvavo_market_coin(asset, ticker_row))
+
+    rows.sort(key=lambda coin: (int(coin.get("rank") or 9999), -float(coin.get("market_cap") or 0)))
+    return rows
+
+
+def build_bitvavo_chart_points(coin_id: str, limit: int = LIVE_DESK_CHART_POINT_LIMIT) -> list[dict[str, Any]]:
+    asset = BITVAVO_ASSET_CATALOG.get(str(coin_id or "").strip().lower())
+    if asset is None:
+        return []
+
+    raw_candles = request_json_with_retry(
+        f"{BITVAVO_BASE_URL}/{asset['market']}/candles",
+        {"interval": "1h", "limit": str(max(24, limit))},
+        timeout=REQUEST_TIMEOUT_SECONDS,
+        retries=REQUEST_RETRIES,
+    )
+    if not isinstance(raw_candles, list):
+        return []
+
+    candle_points: list[list[float]] = []
+    for candle in raw_candles:
+        if not isinstance(candle, list) or len(candle) < 5:
+            continue
+        try:
+            timestamp = int(candle[0])
+            close_price_eur = float(candle[4])
+        except (TypeError, ValueError):
+            continue
+        candle_points.append([timestamp, convert_market_quote_amount(close_price_eur, "EUR", "USD")])
+
+    candle_points.sort(key=lambda point: point[0])
+    return build_chart_points(candle_points, limit=max(24, limit))
+
+
+def build_bitvavo_live_desk_payload(tracked_ids: list[str] | tuple[str, ...], requested_coin_id: str) -> dict[str, Any]:
+    top_coins = build_bitvavo_market_rows(tracked_ids)
+    selected_coin = next((coin for coin in top_coins if str(coin.get("id", "")).lower() == requested_coin_id), None) or (top_coins[0] if top_coins else None)
+    chart_points = build_bitvavo_chart_points(str(selected_coin.get("id", ""))) if selected_coin else []
+    if selected_coin and not chart_points:
+        chart_points = build_intraday_fallback_chart(selected_coin.get("price"), selected_coin.get("change"))
+
+    return {
+        "ok": True,
+        "message": "Using Bitvavo live feed.",
+        "topCoins": top_coins,
+        "selectedCoin": selected_coin,
+        "selectedCoinId": str(selected_coin.get("id", "")) if selected_coin else "",
+        "chart": chart_points,
+        "source": {
+            "provider": "Bitvavo",
+            "apiKeyConfigured": False,
+            "fallback": True,
+            "windowHours": 24,
+            "quoteCurrency": "USD",
+            "estimatedMarketCap": True,
+        },
+    }
 
 
 def format_market_coin(coin: dict[str, Any]) -> dict[str, Any]:
@@ -1624,9 +1870,9 @@ def init_db() -> None:
         
         # Backfill is_free for existing signals - mark tier 1 signals as free
         try:
-            conn.execute("UPDATE daily_signals SET is_free = 1 WHERE tier_number = 1 AND is_free = 0")
-        except:
-            pass  # Column might not exist in old databases
+            conn.execute("UPDATE daily_signals SET is_free = 1 WHERE tier_number = ? AND is_free = 0", (TIER_NUMBER_MIN,))
+        except Exception as exc:
+            logger.warning("Skipping daily_signals is_free backfill during migration: %s", exc)
         
         ensure_daily_signals(conn)
 
@@ -1869,8 +2115,8 @@ def parse_admin_signal_payload(payload: dict[str, Any]) -> tuple[dict[str, Any] 
 
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", signal_day):
         return None, (jsonify({"ok": False, "message": "Use day format YYYY-MM-DD."}), 400)
-    if tier_number < 1 or tier_number > 6:
-        return None, (jsonify({"ok": False, "message": "Tier number must be between 1 and 6."}), 400)
+    if tier_number < TIER_NUMBER_MIN or tier_number > TIER_NUMBER_MAX:
+        return None, (jsonify({"ok": False, "message": f"Tier number must be between {TIER_NUMBER_MIN} and {TIER_NUMBER_MAX}."}), 400)
     if direction not in {"Long", "Short"}:
         return None, (jsonify({"ok": False, "message": "Direction must be Long or Short."}), 400)
     if status not in {"draft", "published", "open", "archived", "cancelled"}:
@@ -2563,28 +2809,12 @@ def send_verification_email(email: str, token: str) -> bool:
     subject = "VaultSignalsAI account verification"
     body = f"Please verify your account by visiting: {confirm_url}\n\nIf this was not you, ignore this message."
 
-    try:
-        smtp_server = os.getenv("SMTP_HOST", "localhost")
-        smtp_port = int(os.getenv("SMTP_PORT", "1025"))
-        smtp_username = os.getenv("SMTP_USERNAME", "")
-        smtp_password = os.getenv("SMTP_PASSWORD", "")
-        smtp_use_tls = os.getenv("SMTP_USE_TLS", "false").lower() in {"1", "true", "yes"}
-        with smtplib.SMTP(smtp_server, smtp_port, timeout=10) as server:
-            if smtp_use_tls:
-                server.starttls()
-            if smtp_username and smtp_password:
-                server.login(smtp_username, smtp_password)
-            msg = EmailMessage()
-            msg["Subject"] = subject
-            msg["From"] = os.getenv("EMAIL_FROM", "no-reply@vaultsignalsai.com")
-            msg["To"] = email
-            msg.set_content(body)
-            server.send_message(msg)
-        return True
-    except Exception as e:
-        # Do NOT log the token itself in production; log the redacted URL host only.
-        logger.warning("Could not send verification email to %s via SMTP (%s): %s", email, smtp_server, e)
-        return False
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = EMAIL_FROM
+    msg["To"] = email
+    msg.set_content(body)
+    return send_smtp_message(msg)
 
 
 def verify_email_token(token: str) -> tuple[dict[str, Any], int]:
@@ -2904,24 +3134,37 @@ def create_purchase() -> tuple[Any, int]:
     """Create a new signal purchase/subscription."""
     if g.current_account is None:
         return jsonify({"ok": False, "message": "Log in to purchase signals."}), 401
-    
-    data = request.get_json() or {}
-    tier_number = data.get("tierNumber", 1)
-    tier_name = data.get("tierName", f"Tier {tier_number}")
-    plan_name = data.get("planName", "Monthly")
-    billing_cycle = data.get("billingCycle", "monthly")
-    billing_method = data.get("billingMethod", "paypal")
-    price_gbp = float(data.get("priceGbp", 0))
-    signals_per_day = int(data.get("signalsPerDay", 1))
-    
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"ok": False, "message": "Provide a valid JSON body."}), 400
+
+    try:
+        tier_number = int(data.get("tierNumber", TIER_NUMBER_MIN))
+        price_gbp = float(data.get("priceGbp", 0))
+        signals_per_day = int(data.get("signalsPerDay", 1))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "message": "Tier, price and signals per day must be valid numbers."}), 400
+
+    tier_name = str(data.get("tierName", f"Tier {tier_number}")).strip() or f"Tier {tier_number}"
+    plan_name = str(data.get("planName", DEFAULT_BILLING_CYCLE.title())).strip() or DEFAULT_BILLING_CYCLE.title()
+    billing_cycle = str(data.get("billingCycle", DEFAULT_BILLING_CYCLE)).strip().lower() or DEFAULT_BILLING_CYCLE
+    billing_method = str(data.get("billingMethod", "paypal")).strip().lower() or "paypal"
+
+    if tier_number < TIER_NUMBER_MIN or tier_number > TIER_NUMBER_MAX:
+        return jsonify({"ok": False, "message": f"Tier number must be between {TIER_NUMBER_MIN} and {TIER_NUMBER_MAX}."}), 400
     if price_gbp <= 0:
         return jsonify({"ok": False, "message": "Invalid price."}), 400
-    
-    # Calculate expiry date (default 30 days for monthly)
-    from datetime import datetime, timedelta
-    expiry_date = datetime.utcnow() + timedelta(days=30 if billing_cycle == "monthly" else 365)
+    if signals_per_day <= 0:
+        return jsonify({"ok": False, "message": "Signals per day must be greater than zero."}), 400
+    if billing_cycle not in VALID_BILLING_CYCLES:
+        return jsonify({"ok": False, "message": "Unsupported billing cycle."}), 400
+    if billing_method not in PAYMENT_LINKS:
+        return jsonify({"ok": False, "message": "Unsupported billing method."}), 400
+
+    expiry_date = None if billing_cycle == "lifetime" else utc_now() + timedelta(days=BILLING_CYCLE_DAYS.get(billing_cycle, BILLING_CYCLE_DAYS.get(DEFAULT_BILLING_CYCLE, 30)))
     next_renewal = expiry_date
-    
+
     account_id = int(g.current_account["id"])
     with get_db() as conn:
         ensure_community_profile(conn, account_id, str(g.current_account["username"] or "member"))
@@ -2932,7 +3175,7 @@ def create_purchase() -> tuple[Any, int]:
             INSERT INTO purchases (account_id, tier_name, tier_number, plan_name, billing_cycle, billing_method, price_gbp, signals_per_day, created_at, expires_at, months_active, auto_renew, next_renewal_date)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, 1, 1, ?)
             """,
-            (account_id, tier_name, tier_number, plan_name, billing_cycle, billing_method, price_gbp, signals_per_day, expiry_date.isoformat(), next_renewal.isoformat())
+            (account_id, tier_name, tier_number, plan_name, billing_cycle, billing_method, price_gbp, signals_per_day, format_db_timestamp(expiry_date), format_db_timestamp(next_renewal))
         )
         purchase_id = conn.execute("SELECT last_insert_rowid() as id").fetchone()["id"]
         
@@ -2959,15 +3202,15 @@ def create_purchase() -> tuple[Any, int]:
                 (account_id, price_gbp)
             )
         
-        # Queue renewal reminder email (7 days before expiry)
-        reminder_date = expiry_date - timedelta(days=7)
-        conn.execute(
-            """
-            INSERT INTO email_queue (account_id, email_type, recipient_email, scheduled_for, status)
-            VALUES (?, 'renewal_reminder', ?, ?, 'pending')
-            """,
-            (account_id, g.current_account["email"], reminder_date.isoformat())
-        )
+        if expiry_date is not None:
+            reminder_date = expiry_date - timedelta(days=RENEWAL_REMINDER_LEAD_DAYS)
+            conn.execute(
+                """
+                INSERT INTO email_queue (account_id, email_type, recipient_email, scheduled_for, status)
+                VALUES (?, 'renewal_reminder', ?, ?, 'pending')
+                """,
+                (account_id, g.current_account["email"], format_db_timestamp(reminder_date))
+            )
 
         conn.execute(
             "UPDATE account_balances SET total_invested = total_invested + ?, updated_at = CURRENT_TIMESTAMP WHERE account_id = ?",
@@ -2977,8 +3220,6 @@ def create_purchase() -> tuple[Any, int]:
             "INSERT INTO account_performance_snapshots (account_id, period_day, invested_amount, profit_amount) VALUES (?, ?, ?, 0)",
             (account_id, utc_now().strftime("%Y-%m-%d"), price_gbp),
         )
-        
-        conn.commit()
     
     return jsonify({
         "ok": True,
@@ -3050,21 +3291,21 @@ def member_dashboard() -> tuple[Any, int]:
     total_spent = loyalty["total_spent_gbp"] if loyalty else 0
     
     badges = []
-    if months_active >= 1:
+    if months_active >= LOYALTY_MEMBER_BADGE_MONTHS:
         badges.append({"name": "Member", "icon": "👤", "achievement": "Joined VaultSignalsAI"})
-    if months_active >= 6:
+    if months_active >= LOYALTY_TRUSTED_BADGE_MONTHS:
         badges.append({"name": "Loyal Customer (6mo)", "icon": "⭐", "achievement": "6+ months with us", "bonus": "+1 week/purchase"})
-    if months_active >= 12:
+    if months_active >= LOYALTY_VETERAN_BADGE_MONTHS:
         badges.append({"name": "VIP Member (1yr)", "icon": "👑", "achievement": "1+ year member"})
-    if total_spent >= 100:
+    if total_spent >= LOYALTY_SUPPORTER_SPEND_GBP:
         badges.append({"name": "Signal Enthusiast", "icon": "🎯", "achievement": f"£{total_spent:.2f} invested"})
     
     loyalty_level = "bronze"
-    if months_active >= 12:
+    if months_active >= LOYALTY_LEVEL_DIAMOND_MONTHS:
         loyalty_level = "diamond"
-    elif months_active >= 6:
+    elif months_active >= LOYALTY_LEVEL_GOLD_MONTHS:
         loyalty_level = "gold"
-    elif months_active >= 3:
+    elif months_active >= LOYALTY_LEVEL_SILVER_MONTHS:
         loyalty_level = "silver"
     
     return jsonify({
@@ -3208,8 +3449,6 @@ def community_settings_update() -> tuple[Any, int]:
         return jsonify({"ok": False, "message": "Bio is too long."}), 400
 
     # Auto-compute rank from active tier — no manual entry
-    _RANK_BY_TIER = {0: "", 1: "Starter", 2: "Trader", 3: "Pro", 4: "Expert", 5: "Elite", 6: "Vault Elite"}
-
     account_id = int(g.current_account["id"])
     with get_db() as conn:
         tier_row = conn.execute(
@@ -3217,7 +3456,7 @@ def community_settings_update() -> tuple[Any, int]:
             (account_id,),
         ).fetchone()
         top_tier = int(tier_row["top"] or 0) if tier_row and tier_row["top"] else 0
-        user_rank = _RANK_BY_TIER.get(top_tier, f"Tier {top_tier}" if top_tier else "")
+        user_rank = COMMUNITY_RANK_BY_TIER.get(top_tier, f"Tier {top_tier}" if top_tier else "")
 
         ensure_community_profile(conn, account_id, str(g.current_account["username"] or "member"))
         existing_profile = conn.execute(
@@ -3695,11 +3934,16 @@ def paypal_checkout() -> tuple[Any, int]:
     """Initialize PayPal payment checkout."""
     if g.current_account is None:
         return jsonify({"ok": False, "message": "Log in to checkout."}), 401
-    
-    data = request.get_json() or {}
-    purchase_id = data.get("purchaseId")
-    
-    if not purchase_id:
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"ok": False, "message": "Provide a valid JSON body."}), 400
+    try:
+        purchase_id = int(data.get("purchaseId", 0))
+    except (TypeError, ValueError):
+        purchase_id = 0
+
+    if purchase_id <= 0:
         return jsonify({"ok": False, "message": "Invalid purchase ID."}), 400
     
     with get_db() as conn:
@@ -3719,7 +3963,6 @@ def paypal_checkout() -> tuple[Any, int]:
             "UPDATE transactions SET status = 'pending_payment' WHERE purchase_id = ?",
             (purchase_id,)
         )
-        conn.commit()
     
     return jsonify({
         "ok": True,
@@ -3734,7 +3977,9 @@ def paypal_checkout() -> tuple[Any, int]:
 @app.post("/api/payment/webhook/paypal")
 def paypal_webhook() -> tuple[Any, int]:
     """PayPal webhook for payment confirmations."""
-    data = request.get_json() or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"ok": False, "message": "Invalid webhook payload."}), 400
     if not verify_paypal_webhook_signature(data):
         logger.warning("Rejected PayPal webhook: signature verification failed.")
         return jsonify({"ok": False, "message": "Invalid webhook signature."}), 400
@@ -3742,9 +3987,12 @@ def paypal_webhook() -> tuple[Any, int]:
     event_type = data.get("event_type", "")
     
     if event_type == "CHECKOUT.ORDER.APPROVED":
-        purchase_id = data.get("resource", {}).get("purchase_id")
+        try:
+            purchase_id = int(data.get("resource", {}).get("purchase_id", 0))
+        except (TypeError, ValueError):
+            purchase_id = 0
         
-        if purchase_id:
+        if purchase_id > 0:
             with get_db() as conn:
                 # Update transaction and purchase to completed
                 conn.execute(
@@ -3755,7 +4003,6 @@ def paypal_webhook() -> tuple[Any, int]:
                     "UPDATE purchases SET last_renewed_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (purchase_id,)
                 )
-                conn.commit()
                 
                 # Queue thank you email
                 purchase = conn.execute("SELECT account_id FROM purchases WHERE id = ?", (purchase_id,)).fetchone()
@@ -3766,7 +4013,6 @@ def paypal_webhook() -> tuple[Any, int]:
                             "INSERT INTO email_queue (account_id, email_type, recipient_email, status) VALUES (?, 'purchase_confirmation', ?, 'pending')",
                             (purchase["account_id"], account["email"])
                         )
-                        conn.commit()
     
     return jsonify({"ok": True}), 200
 
@@ -3824,11 +4070,14 @@ def admin_send_renewal_reminders() -> tuple[Any, int]:
         
         sent_count = 0
         for purchase in purchases:
-            expires_at = datetime.fromisoformat(purchase["expires_at"])
+            expires_at = parse_db_timestamp(purchase["expires_at"])
+            if expires_at is None:
+                logger.warning("Skipping renewal reminder for purchase %s with invalid expires_at value %r", purchase["id"], purchase["expires_at"])
+                continue
             days_until = (expires_at - today).days
             
-            # Send reminder if within 7 days
-            if 0 <= days_until <= 7:
+            # Send reminder if within configured lead window.
+            if 0 <= days_until <= RENEWAL_REMINDER_LEAD_DAYS:
                 conn.execute(
                     "INSERT INTO email_queue (account_id, email_type, recipient_email, status) VALUES (?, 'renewal_reminder', ?, 'pending')",
                     (purchase["account_id"], purchase["email"])
@@ -3838,8 +4087,6 @@ def admin_send_renewal_reminders() -> tuple[Any, int]:
                     (purchase["id"],)
                 )
                 sent_count += 1
-        
-        conn.commit()
     
     return jsonify({
         "ok": True,
@@ -3851,20 +4098,13 @@ def admin_send_renewal_reminders() -> tuple[Any, int]:
 def send_renewal_reminder_email(email: str, account_name: str, expires_at: str, signals_per_day: int) -> bool:
     """Send renewal reminder email to customer."""
     try:
-        from email.mime.text import MIMEText
-        from email.mime.multipart import MIMEMultipart
-        
-        smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
-        smtp_port = int(os.getenv("SMTP_PORT", 587))
-        smtp_user = os.getenv("SMTP_USER", "")
-        smtp_password = os.getenv("SMTP_PASSWORD", "")
-        email_from = os.getenv("EMAIL_FROM", "VaultSignalsAI@AI.com")
-        
-        if not smtp_user or not smtp_password:
+        expires_dt = parse_db_timestamp(expires_at)
+        if expires_dt is None:
+            logger.warning("Could not send renewal email to %s because expires_at is invalid: %r", email, expires_at)
             return False
-        
-        expires_date = datetime.fromisoformat(expires_at).strftime("%B %d, %Y")
-        
+
+        expires_date = expires_dt.strftime("%B %d, %Y")
+
         subject = "Your VaultSignalsAI subscription expires soon!"
         html_body = f"""
         <html>
@@ -3879,19 +4119,15 @@ def send_renewal_reminder_email(email: str, account_name: str, expires_at: str, 
             </body>
         </html>
         """
-        
-        msg = MIMEMultipart("alternative")
+
+        msg = EmailMessage()
         msg["Subject"] = subject
-        msg["From"] = email_from
+        msg["From"] = EMAIL_FROM
         msg["To"] = email
-        msg.attach(MIMEText(html_body, "html"))
-        
-        with smtplib.SMTP(smtp_server, smtp_port, timeout=10) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_password)
-            server.sendmail(email_from, email, msg.as_string())
-        
-        return True
+        msg.set_content(f"Your VaultSignalsAI subscription expires on {expires_date}.")
+        msg.add_alternative(html_body, subtype="html")
+
+        return send_smtp_message(msg)
     except Exception as e:
         logger.warning("Failed to send renewal email to %s: %s", email, e)
         return False
@@ -3900,18 +4136,6 @@ def send_renewal_reminder_email(email: str, account_name: str, expires_at: str, 
 def send_purchase_confirmation_email(email: str, account_name: str, tier_name: str, amount: float, invoice_number: str) -> bool:
     """Send purchase confirmation email."""
     try:
-        from email.mime.text import MIMEText
-        from email.mime.multipart import MIMEMultipart
-        
-        smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
-        smtp_port = int(os.getenv("SMTP_PORT", 587))
-        smtp_user = os.getenv("SMTP_USER", "")
-        smtp_password = os.getenv("SMTP_PASSWORD", "")
-        email_from = os.getenv("EMAIL_FROM", "VaultSignalsAI@AI.com")
-        
-        if not smtp_user or not smtp_password:
-            return False
-        
         subject = "Purchase Confirmed - VaultSignalsAI"
         html_body = f"""
         <html>
@@ -3931,19 +4155,15 @@ def send_purchase_confirmation_email(email: str, account_name: str, tier_name: s
             </body>
         </html>
         """
-        
-        msg = MIMEMultipart("alternative")
+
+        msg = EmailMessage()
         msg["Subject"] = subject
-        msg["From"] = email_from
+        msg["From"] = EMAIL_FROM
         msg["To"] = email
-        msg.attach(MIMEText(html_body, "html"))
-        
-        with smtplib.SMTP(smtp_server, smtp_port, timeout=10) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_password)
-            server.sendmail(email_from, email, msg.as_string())
-        
-        return True
+        msg.set_content(f"Purchase confirmed for {tier_name}. Invoice: {invoice_number}.")
+        msg.add_alternative(html_body, subtype="html")
+
+        return send_smtp_message(msg)
     except Exception as e:
         logger.warning("Failed to send confirmation email to %s: %s", email, e)
         return False
@@ -3979,18 +4199,34 @@ def stream():
                         headers=market_api_headers(),
                     )
 
-                    if prices:
-                        # Emit each crypto's data
+                    emitted_rows: list[dict[str, Any]] = []
+                    if isinstance(prices, dict) and prices:
                         for crypto_id in crypto_ids:
                             if crypto_id in prices:
-                                data = {
-                                    "id": crypto_id,
-                                    "symbol": crypto_id.upper(),
-                                    "price": prices[crypto_id].get("usd", 0),
-                                    "change_24h": prices[crypto_id].get("usd_24h_change", 0),
-                                    "market_cap": prices[crypto_id].get("usd_market_cap", 0)
-                                }
-                                yield f"data: {json.dumps(data)}\n\n"
+                                emitted_rows.append(
+                                    {
+                                        "id": crypto_id,
+                                        "symbol": crypto_id.upper(),
+                                        "price": prices[crypto_id].get("usd", 0),
+                                        "change_24h": prices[crypto_id].get("usd_24h_change", 0),
+                                        "market_cap": prices[crypto_id].get("usd_market_cap", 0),
+                                    }
+                                )
+                    else:
+                        fallback_rows = build_bitvavo_market_rows(crypto_ids)
+                        emitted_rows.extend(
+                            {
+                                "id": str(coin.get("id", "")).lower(),
+                                "symbol": str(coin.get("symbol", "")).upper(),
+                                "price": coin.get("price", 0),
+                                "change_24h": coin.get("change", 0),
+                                "market_cap": coin.get("market_cap", 0),
+                            }
+                            for coin in fallback_rows
+                        )
+
+                    for data in emitted_rows:
+                        yield f"data: {json.dumps(data)}\n\n"
                     last_update = time.time()
 
                 if time.time() - last_heartbeat > 15:
@@ -4056,8 +4292,12 @@ def crypto_data():
 
         if isinstance(crypto_json, list):
             market_data["crypto"] = [format_market_coin(coin) for coin in crypto_json]
+        if not market_data["crypto"]:
+            market_data["crypto"] = build_bitvavo_market_rows(tracked_ids)
 
         market_data["summary"] = build_market_summary(global_json, market_data["crypto"])
+        if not market_data["crypto"] and cached_payload:
+            return jsonify(cached_payload), 200
         _MARKET_CACHE["payload"] = market_data
         _MARKET_CACHE["updated_at"] = time.time()
 
@@ -4102,25 +4342,21 @@ def live_desk_data() -> tuple[Any, int]:
         )
 
         market_rows = crypto_json if isinstance(crypto_json, list) else []
+        if not market_rows:
+            payload = build_bitvavo_live_desk_payload(tracked_ids, requested_coin_id)
+            if payload.get("topCoins"):
+                _LIVE_DESK_CACHE[cache_key] = {"payload": payload, "updated_at": time.time()}
+                return jsonify(payload), 200
         top_coins = [format_live_desk_coin(coin) for coin in market_rows]
         selected_raw_coin = next((coin for coin in market_rows if str(coin.get("id", "")).lower() == requested_coin_id), None)
         if selected_raw_coin is None and market_rows:
             selected_raw_coin = market_rows[0]
 
         if selected_raw_coin is None:
-            payload = {
-                "ok": True,
-                "topCoins": [],
-                "selectedCoin": None,
-                "selectedCoinId": "",
-                "chart": [],
-                "source": {
-                    "provider": "CoinGecko",
-                    "apiKeyConfigured": bool(COINGECKO_API_KEY),
-                },
-            }
-            _LIVE_DESK_CACHE[cache_key] = {"payload": payload, "updated_at": time.time()}
-            return jsonify(payload), 200
+            payload = build_bitvavo_live_desk_payload(tracked_ids, requested_coin_id)
+            if payload.get("topCoins"):
+                _LIVE_DESK_CACHE[cache_key] = {"payload": payload, "updated_at": time.time()}
+                return jsonify(payload), 200
 
         selected_coin_id = str(selected_raw_coin.get("id", LIVE_DESK_DEFAULT_COIN)).strip().lower()
         chart_points = build_sparkline_points(
@@ -4154,6 +4390,11 @@ def live_desk_data() -> tuple[Any, int]:
 
     if cached_entry and cached_entry.get("payload"):
         return jsonify(cached_entry["payload"]), 200
+
+    bitvavo_payload = build_bitvavo_live_desk_payload(tracked_ids, requested_coin_id)
+    if bitvavo_payload.get("topCoins"):
+        _LIVE_DESK_CACHE[cache_key] = {"payload": bitvavo_payload, "updated_at": time.time()}
+        return jsonify(bitvavo_payload), 200
 
     cached_market_payload = _MARKET_CACHE.get("payload") if isinstance(_MARKET_CACHE.get("payload"), dict) else None
     cached_market_rows = (cached_market_payload or {}).get("crypto") if cached_market_payload else []
@@ -4222,23 +4463,13 @@ def submit_feedback() -> tuple[Any, int]:
     body = f"From: {email}\nTopic: {topic}\n\n{question}"
 
     try:
-        smtp_server = os.getenv("SMTP_HOST", "localhost")
-        smtp_port = int(os.getenv("SMTP_PORT", "1025"))
-        smtp_username = os.getenv("SMTP_USERNAME", "")
-        smtp_password = os.getenv("SMTP_PASSWORD", "")
-        smtp_use_tls = os.getenv("SMTP_USE_TLS", "false").lower() in {"1", "true", "yes"}
-        with smtplib.SMTP(smtp_server, smtp_port, timeout=10) as server:
-            if smtp_use_tls:
-                server.starttls()
-            if smtp_username and smtp_password:
-                server.login(smtp_username, smtp_password)
-            msg = EmailMessage()
-            msg["Subject"] = subject
-            msg["From"] = FEEDBACK_EMAIL_FROM
-            msg["To"] = FEEDBACK_EMAIL
-            msg["Reply-To"] = email
-            msg.set_content(body)
-            server.send_message(msg)
+        msg = EmailMessage()
+        msg["Subject"] = subject
+        msg["From"] = FEEDBACK_EMAIL_FROM
+        msg["To"] = FEEDBACK_EMAIL
+        msg["Reply-To"] = email
+        msg.set_content(body)
+        send_smtp_message(msg)
     except Exception as e:
         logger.warning("Could not send feedback email: %s", e)
         # Feedback receipt is still acknowledged even if SMTP is not configured locally.
