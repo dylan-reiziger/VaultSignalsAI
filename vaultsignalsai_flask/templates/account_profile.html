@@ -54,10 +54,18 @@
         </section>
 
         <section class="account-profile-shell account-profile-hero">
-          <div class="account-profile-title">
-            <p class="eyebrow">Personal details</p>
-            <h1 class="settings-page-heading">Advanced account editor</h1>
-            <p class="settings-page-lede">This page keeps your identity details together in one place while the main settings page stays focused on platform preferences.</p>
+          <div class="account-profile-hero-grid">
+            <div class="account-profile-title">
+              <p class="eyebrow">Personal details</p>
+              <h1 class="settings-page-heading">Advanced account editor</h1>
+              <p class="settings-page-lede">This page keeps your identity details together in one place while the main settings page stays focused on platform preferences.</p>
+            </div>
+            <aside class="account-profile-spotlight">
+              <p class="settings-card-kicker">Account status</p>
+              <div id="accountProfileHeroPills" class="account-profile-status-pills"></div>
+              <div id="accountProfileBadgeShowcase" class="community-badge-strip account-profile-badge-showcase"></div>
+              <p class="account-profile-spotlight-copy">Your trust state, currency setup, and badge identity stay visible here while you update the account itself.</p>
+            </aside>
           </div>
         </section>
 
@@ -79,6 +87,24 @@
                 <p class="settings-card-kicker">Overview</p>
                 <h3>Account information</h3>
                 <p class="settings-card-copy">The rows below mirror the personal-detail style you shared, while keeping the existing VaultSignals color theme.</p>
+              </div>
+
+              <div class="account-profile-overview-grid">
+                <div class="account-profile-overview-card">
+                  <span>Account access</span>
+                  <strong id="accountProfileVerificationState">-</strong>
+                  <p id="accountProfileVerificationNote">Access and purchase status</p>
+                </div>
+                <div class="account-profile-overview-card">
+                  <span>Discord</span>
+                  <strong id="accountProfileDiscordState">-</strong>
+                  <p id="accountProfileDiscordNote">Connection status</p>
+                </div>
+                <div class="account-profile-overview-card">
+                  <span>Currency</span>
+                  <strong id="accountProfileCurrencyState">GBP</strong>
+                  <p id="accountProfileCurrencyNote">Preferred display currency</p>
+                </div>
               </div>
 
               <div class="account-profile-detail-list">
@@ -197,12 +223,57 @@
       window.VAULT_TIERS = JSON.parse('{{ tiers | tojson | safe }}');
     </script>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <script src="{{ url_for('static', filename='badges.js') }}"></script>
     <script>
       (async function () {
         const fallbackAvatar = "{{ url_for('static', filename='vaultsignals-logo.png') }}";
         const form = document.getElementById('accountProfileForm');
         const saveButton = document.getElementById('accountProfileSave');
         const avatarTrigger = document.getElementById('accountProfileAvatarTrigger');
+
+        function escapeHtml(value) {
+          return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+        }
+
+        function toTitleCase(value) {
+          return String(value || '')
+            .replace(/[_-]+/g, ' ')
+            .split(/\s+/)
+            .filter(Boolean)
+            .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+            .join(' ');
+        }
+
+        function buildBadgeStrip(badges, limit = 4) {
+          const items = Array.isArray(badges) ? badges.slice(0, limit) : [];
+          if (!items.length) {
+            return '<p class="chat-empty chat-empty--inline">No badges assigned yet.</p>';
+          }
+          return items.map((badge) => {
+            if (window.VaultBadgeUI?.renderShieldBadge) {
+              return window.VaultBadgeUI.renderShieldBadge(badge, { variant: 'compact' });
+            }
+            return `<span>${escapeHtml(badge.label || badge.shortLabel || 'Badge')}</span>`;
+          }).join('');
+        }
+
+        function buildHeroPills(profile) {
+          const pills = [];
+          pills.push({ tone: 'verified', label: 'Active account' });
+          if (profile.isAdmin) {
+            pills.push({ tone: 'royal', label: 'Admin access' });
+          }
+          pills.push({ tone: 'gold', label: `${escapeHtml(profile.preferredCurrencyCode || 'GBP')} currency` });
+          pills.push({ tone: profile.discordVerificationStatus === 'verified' ? 'emerald' : 'silver', label: `${toTitleCase(profile.discordVerificationStatus || 'not connected')} Discord` });
+          return pills.map((pill) => `
+            <span class="account-profile-status-pill account-profile-status-pill--${pill.tone}">${pill.label}</span>
+          `).join('');
+        }
 
         function setMsg(text, ok) {
           const el = document.getElementById('accountProfileMsg');
@@ -220,7 +291,9 @@
           }
         }
 
-        function renderProfile(profile) {
+        function renderProfile(payload) {
+          const profile = payload?.profile || payload;
+          const badges = Array.isArray(payload?.badges) ? payload.badges : [];
           if (!profile) return;
 
           document.getElementById('accountProfileDisplayName').textContent = profile.displayName || profile.fullName || profile.username || 'Member';
@@ -239,6 +312,17 @@
           document.getElementById('accountProfileZipcode').value = profile.zipcode || '';
           document.getElementById('accountProfileAddress').value = profile.address || '';
           document.getElementById('accountProfileAvatarUrl').value = profile.avatarUrl && profile.avatarUrl !== fallbackAvatar ? profile.avatarUrl : '';
+
+          document.getElementById('accountProfileBadgeShowcase').innerHTML = buildBadgeStrip(badges, 3);
+          document.getElementById('accountProfileHeroPills').innerHTML = buildHeroPills(profile);
+          document.getElementById('accountProfileVerificationState').textContent = 'Active';
+          document.getElementById('accountProfileVerificationNote').textContent = 'Account access is enabled. Paid signals unlock when you buy a tier.';
+          document.getElementById('accountProfileDiscordState').textContent = toTitleCase(profile.discordVerificationStatus || 'not connected');
+          document.getElementById('accountProfileDiscordNote').textContent = profile.discordTag
+            ? `Discord tag: ${profile.discordTag}`
+            : 'No verified Discord tag linked yet.';
+          document.getElementById('accountProfileCurrencyState').textContent = profile.preferredCurrencyCode || 'GBP';
+          document.getElementById('accountProfileCurrencyNote').textContent = 'Used across dashboard and signal views.';
         }
 
         async function loadProfile() {
@@ -251,7 +335,7 @@
           if (!response.ok || !data.ok) {
             throw new Error(data.message || 'Unable to load account profile.');
           }
-          renderProfile(data.profile);
+          renderProfile(data);
           setMsg('Edit any field below and save when ready.', false);
         }
 
@@ -284,7 +368,7 @@
 
             setMsg(data.message || 'Unable to save account details.', response.ok);
             if (response.ok && data.profile) {
-              renderProfile(data.profile);
+              renderProfile(data);
               const currentPassword = document.getElementById('accountProfileCurrentPassword');
               const newPassword = document.getElementById('accountProfileNewPassword');
               if (currentPassword) currentPassword.value = '';

@@ -48,6 +48,7 @@ APP_SECRET_KEY = os.getenv("APP_SECRET_KEY", TOKEN_PEPPER)
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://127.0.0.1:5000").rstrip("/")
 APP_ENV = os.getenv("APP_ENV", os.getenv("FLASK_ENV", "development")).strip().lower()
 IS_DEV_ENV = APP_ENV in {"dev", "development", "local"} or os.getenv("FLASK_DEBUG", "false").lower() in {"1", "true", "yes"}
+BADGE_PREVIEW_ENABLED = os.getenv("BADGE_PREVIEW_ENABLED", "true" if IS_DEV_ENV else "false").lower() in {"1", "true", "yes"}
 
 PAYPAL_API_BASE_URL = os.getenv("PAYPAL_API_BASE_URL", "https://api-m.sandbox.paypal.com").rstrip("/")
 PAYPAL_CLIENT_ID = os.getenv("PAYPAL_CLIENT_ID", "").strip()
@@ -117,6 +118,50 @@ def _load_json_file(path: Path, fallback: Any) -> Any:
         return fallback
 
 
+def normalize_signal_time_utc(raw_value: str | None, session_label: str | None = None, tier_number: int | None = None) -> str:
+    candidate = str(raw_value or "").strip()
+    if candidate and re.match(r"^\d{2}:\d{2}$", candidate):
+        try:
+            hour, minute = [int(part) for part in candidate.split(":", 1)]
+            if 0 <= hour <= 23 and 0 <= minute <= 59:
+                return f"{hour:02d}:{minute:02d}"
+        except ValueError:
+            pass
+
+    session_key = str(session_label or "").strip()
+    if session_key in DEFAULT_SIGNAL_TIME_BY_SESSION:
+        return DEFAULT_SIGNAL_TIME_BY_SESSION[session_key]
+
+    if tier_number in DEFAULT_SIGNAL_TIME_BY_TIER:
+        return DEFAULT_SIGNAL_TIME_BY_TIER[int(tier_number)]
+
+    return DEFAULT_SIGNAL_TIME_BY_SESSION["Session"]
+
+
+def normalize_signal_timer_minutes(raw_value: Any) -> int:
+    try:
+        candidate = int(raw_value)
+    except (TypeError, ValueError):
+        return DEFAULT_SIGNAL_TIMER_MINUTES
+    return min(720, max(15, candidate))
+
+
+def build_signal_window_utc(signal_day: str | None, signal_time_utc: str | None, timer_minutes: int | None) -> tuple[str | None, str | None]:
+    resolved_day = str(signal_day or "").strip()
+    resolved_time = normalize_signal_time_utc(signal_time_utc)
+    resolved_minutes = normalize_signal_timer_minutes(timer_minutes)
+    if not resolved_day or not re.match(r"^\d{4}-\d{2}-\d{2}$", resolved_day):
+        return None, None
+
+    try:
+        starts_at = datetime.strptime(f"{resolved_day} {resolved_time}", "%Y-%m-%d %H:%M").replace(tzinfo=UTC)
+    except ValueError:
+        return None, None
+
+    ends_at = starts_at + timedelta(minutes=resolved_minutes)
+    return starts_at.isoformat().replace("+00:00", "Z"), ends_at.isoformat().replace("+00:00", "Z")
+
+
 COINGECKO_BASE_URL = os.getenv("COINGECKO_BASE_URL", "https://api.coingecko.com/api/v3")
 COINGECKO_API_KEY = os.getenv("COINGECKO_API_KEY", "").strip()
 COINGECKO_API_KEY_HEADER = os.getenv("COINGECKO_API_KEY_HEADER", "x-cg-demo-api-key").strip() or "x-cg-demo-api-key"
@@ -179,6 +224,7 @@ DEFAULT_STOCK_FEED = [
 STATIC_STOCK_FEED = _json_env("STATIC_STOCK_FEED", DEFAULT_STOCK_FEED)
 ALLOWED_CORS_ORIGINS = set(_csv_env("ALLOWED_CORS_ORIGINS", ""))
 ADMIN_USERNAMES = {username.lower() for username in _csv_env("ADMIN_USERNAMES", "admin")}
+AUTO_ADMIN_EMAILS = {email.strip().lower() for email in _csv_env("AUTO_ADMIN_EMAILS", "dylan.reiziger@hotmail.com") if email.strip()}
 _AUTH_REQUEST_LOG: dict[str, list[float]] = {}
 _MARKET_CACHE: dict[str, Any] = {"payload": None, "updated_at": 0.0}
 _LIVE_DESK_CACHE: dict[str, dict[str, Any]] = {}
@@ -227,6 +273,7 @@ LOYALTY_SUPPORTER_SPEND_GBP = _float_env("LOYALTY_SUPPORTER_SPEND_GBP", 100.0)
 LOYALTY_LEVEL_SILVER_MONTHS = int(os.getenv("LOYALTY_LEVEL_SILVER_MONTHS", "3"))
 LOYALTY_LEVEL_GOLD_MONTHS = int(os.getenv("LOYALTY_LEVEL_GOLD_MONTHS", str(LOYALTY_TRUSTED_BADGE_MONTHS)))
 LOYALTY_LEVEL_DIAMOND_MONTHS = int(os.getenv("LOYALTY_LEVEL_DIAMOND_MONTHS", str(LOYALTY_VETERAN_BADGE_MONTHS)))
+DISPLAY_NAME_CHANGE_COOLDOWN_DAYS = int(os.getenv("DISPLAY_NAME_CHANGE_COOLDOWN_DAYS", "30"))
 DISCORD_VERIFICATION_PENDING = "pending"
 DISCORD_VERIFICATION_VERIFIED = "verified"
 DISCORD_VERIFICATION_NOT_CONNECTED = "not_connected"
@@ -268,8 +315,89 @@ COUNTRY_CURRENCY_MAP = {
 
 PROMO_PLANS_GBP = PRICING_CATALOG.get("promoPlansGbp", {})
 DAILY_SIGNAL_BLUEPRINTS = _load_json_file(BASE_DIR / "data" / "daily_signal_blueprints.json", [])
+DEFAULT_SIGNAL_TIME_BY_SESSION = {
+    "London Open": "07:15",
+    "Europe Midday": "10:30",
+    "US Pre-Market": "12:45",
+    "US Open": "14:30",
+    "US Midday": "17:00",
+    "US Close": "20:00",
+    "Session": "12:00",
+}
+DEFAULT_SIGNAL_TIME_BY_TIER = {
+    1: "07:15",
+    2: "10:30",
+    3: "12:45",
+    4: "14:30",
+    5: "17:00",
+    6: "20:00",
+}
+DEFAULT_SIGNAL_TIMER_MINUTES = 90
+DEFAULT_PERFORMANCE_TIMELINE = [
+    {
+        "month": "January",
+        "value": "+12.4% Net",
+        "note": "Trend continuation month with controlled drawdowns and disciplined exits.",
+        "status": "positive",
+    },
+    {
+        "month": "February",
+        "value": "+8.1% Net",
+        "note": "Selective participation in lower-volatility sessions preserved quality.",
+        "status": "positive",
+    },
+    {
+        "month": "March",
+        "value": "+1.7% Net",
+        "note": "Defensive risk posture reduced exposure during mixed market structure.",
+        "status": "flat",
+    },
+    {
+        "month": "April",
+        "value": "+9.6% Net",
+        "note": "Momentum re-expansion supported cleaner target progression on majors.",
+        "status": "positive",
+    },
+]
+PERFORMANCE_TIMELINE = _load_json_file(BASE_DIR / "data" / "performance_timeline.json", DEFAULT_PERFORMANCE_TIMELINE)
 
 DEFAULT_CURRENCY_SYMBOL = SUPPORTED_CURRENCIES.get(DEFAULT_CURRENCY_CODE, SUPPORTED_CURRENCIES["GBP"])["symbol"]
+
+
+def get_performance_timeline() -> list[dict[str, str]]:
+    rows = PERFORMANCE_TIMELINE if isinstance(PERFORMANCE_TIMELINE, list) else []
+    prepared_rows: list[dict[str, str]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        month = str(row.get("month", "")).strip()
+        value = str(row.get("value", "")).strip()
+        note = str(row.get("note", "")).strip()
+        status = str(row.get("status", "flat")).strip().lower()
+        if status not in {"positive", "flat", "negative"}:
+            status = "flat"
+        if not month or not value or not note:
+            continue
+        prepared_rows.append(
+            {
+                "month": month,
+                "value": value,
+                "note": note,
+                "status_class": f"is-{status}",
+            }
+        )
+
+    if prepared_rows:
+        return prepared_rows
+
+    return [
+        {
+            "month": "January",
+            "value": "+0.0% Net",
+            "note": "Add your verified monthly metrics in data/performance_timeline.json.",
+            "status_class": "is-flat",
+        }
+    ]
 
 
 def get_cipher() -> Fernet | None:
@@ -484,7 +612,8 @@ def serialize_account(user: sqlite3.Row | None) -> dict[str, Any] | None:
     return {
         "id": user["id"],
         "username": user["username"],
-        "isAdmin": is_admin_username(user["username"]),
+        "isAdmin": is_admin_account(user),
+        "isVerified": bool(user["verified"]),
         "fullName": resolved_full_name,
         "email": user["email"],
         "discordUsername": resolved_discord_username,
@@ -508,10 +637,25 @@ def is_admin_username(username: str | None) -> bool:
     return candidate in ADMIN_USERNAMES
 
 
+def is_auto_admin_email(email: str | None) -> bool:
+    candidate = (email or "").strip().lower()
+    if not candidate:
+        return False
+    return candidate in AUTO_ADMIN_EMAILS
+
+
+def is_admin_account(account: sqlite3.Row | None) -> bool:
+    if account is None:
+        return False
+    if "is_admin" in account.keys():
+        return bool(account["is_admin"])
+    return is_admin_username(account["username"] if "username" in account.keys() else None)
+
+
 def require_admin_api() -> tuple[sqlite3.Row | None, tuple[Any, int] | None]:
     if g.current_account is None:
         return None, (jsonify({"ok": False, "message": "Login required."}), 401)
-    if not is_admin_username(g.current_account["username"]):
+    if not is_admin_account(g.current_account):
         return None, (jsonify({"ok": False, "message": "Admin access required."}), 403)
     return g.current_account, None
 
@@ -528,6 +672,7 @@ def fetch_account_by_id(conn: sqlite3.Connection, account_id: int) -> sqlite3.Ro
             a.discord_username,
             a.discord_username_enc,
             a.discord_tag,
+            a.is_admin,
             a.verified,
             a.preferred_currency_code,
             dv.verification_status AS discord_verification_status,
@@ -556,10 +701,17 @@ def fetch_account_profile_by_id(conn: sqlite3.Connection, account_id: int) -> sq
             a.zipcode_enc,
             a.address,
             a.address_enc,
+            a.discord_tag,
+            a.is_admin,
+            a.preferred_currency_code,
+            a.verified,
             cp.display_name,
-            cp.avatar_url
+            cp.avatar_url,
+            dv.verification_status AS discord_verification_status,
+            dv.verified_tag AS discord_verified_tag
         FROM accounts a
         LEFT JOIN community_profiles cp ON cp.account_id = a.id
+        LEFT JOIN account_discord_verifications dv ON dv.account_id = a.id
         WHERE a.id = ?
         """,
         (account_id,),
@@ -587,6 +739,11 @@ def serialize_account_profile(row: sqlite3.Row | None) -> dict[str, Any] | None:
         "address": address,
         "addressSummary": address_summary,
         "avatarUrl": row["avatar_url"] or COMMUNITY_DEFAULT_AVATAR,
+        "isVerified": bool(row["verified"]),
+        "isAdmin": is_admin_account(row),
+        "preferredCurrencyCode": normalize_currency_code(row["preferred_currency_code"]) if row["preferred_currency_code"] else "GBP",
+        "discordVerificationStatus": row["discord_verification_status"] or DISCORD_VERIFICATION_NOT_CONNECTED,
+        "discordTag": row["discord_verified_tag"] or row["discord_tag"] or "",
     }
 
 
@@ -723,8 +880,10 @@ def ensure_daily_signals(conn: sqlite3.Connection, signal_day: str | None = None
     for signal in DAILY_SIGNAL_BLUEPRINTS:
         # Mark tier 1 signals as free for all logged-in users
         is_free = 1 if signal.get("tier_number") == 1 else 0
+        signal_time_utc = normalize_signal_time_utc(signal.get("signal_time_utc"), signal.get("session_label"), int(signal.get("tier_number", 0) or 0))
+        timer_minutes = normalize_signal_timer_minutes(signal.get("timer_minutes"))
         conn.execute(
-            "INSERT INTO daily_signals (signal_day, tier_number, asset_symbol, market, direction, entry_price, target_price, stop_price, confidence_label, session_label, thesis, base_currency_code, status, is_free) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO daily_signals (signal_day, tier_number, asset_symbol, market, direction, entry_price, target_price, stop_price, confidence_label, session_label, thesis, signal_time_utc, timer_minutes, base_currency_code, status, is_free) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 resolved_day,
                 signal["tier_number"],
@@ -737,6 +896,8 @@ def ensure_daily_signals(conn: sqlite3.Connection, signal_day: str | None = None
                 signal["confidence_label"],
                 signal["session_label"],
                 signal["thesis"],
+                signal_time_utc,
+                timer_minutes,
                 "USD",
                 "published",
                 is_free,
@@ -747,6 +908,13 @@ def ensure_daily_signals(conn: sqlite3.Connection, signal_day: str | None = None
 
 def serialize_signal_row(signal_row: sqlite3.Row, selected_currency_code: str) -> dict[str, Any]:
     base_currency = normalize_currency_code(signal_row["base_currency_code"] or "USD")
+    signal_time_utc = normalize_signal_time_utc(
+        signal_row["signal_time_utc"] if "signal_time_utc" in signal_row.keys() else None,
+        signal_row["session_label"],
+        int(signal_row["tier_number"] or 0),
+    )
+    timer_minutes = normalize_signal_timer_minutes(signal_row["timer_minutes"] if "timer_minutes" in signal_row.keys() else DEFAULT_SIGNAL_TIMER_MINUTES)
+    starts_at_utc, ends_at_utc = build_signal_window_utc(signal_row["signal_day"], signal_time_utc, timer_minutes)
     return {
         "id": signal_row["id"],
         "tierNumber": signal_row["tier_number"],
@@ -763,6 +931,10 @@ def serialize_signal_row(signal_row: sqlite3.Row, selected_currency_code: str) -
         "thesis": signal_row["thesis"],
         "status": signal_row["status"],
         "signalDay": signal_row["signal_day"],
+        "signalTimeUtc": signal_time_utc,
+        "timerMinutes": timer_minutes,
+        "signalStartsAtUtc": starts_at_utc,
+        "signalEndsAtUtc": ends_at_utc,
     }
 
 
@@ -866,24 +1038,375 @@ def can_account_chat(conn: sqlite3.Connection, account_id: int) -> tuple[bool, s
     return True, None, active_tier
 
 
-def build_badges_for_account(conn: sqlite3.Connection, account_id: int) -> list[dict[str, Any]]:
-    badges: list[dict[str, Any]] = []
-    active_tier = get_active_tier_number(conn, account_id)
-    if active_tier >= 1:
-        badges.append({"code": f"tier_{active_tier}", "label": f"Tier {active_tier} Member"})
+def resolve_loyalty_level(months_active: int) -> str:
+    if months_active >= LOYALTY_LEVEL_DIAMOND_MONTHS:
+        return "diamond"
+    if months_active >= LOYALTY_LEVEL_GOLD_MONTHS:
+        return "gold"
+    if months_active >= LOYALTY_LEVEL_SILVER_MONTHS:
+        return "silver"
+    return "bronze"
 
+
+def get_loyalty_snapshot(conn: sqlite3.Connection, account_id: int) -> dict[str, Any]:
     loyalty = conn.execute(
-        "SELECT months_active, total_spent_gbp FROM customer_loyalty WHERE account_id = ?",
+        "SELECT customer_since, months_active, total_spent_gbp FROM customer_loyalty WHERE account_id = ?",
         (account_id,),
     ).fetchone()
     months_active = int((loyalty["months_active"] if loyalty else 0) or 0)
     total_spent = float((loyalty["total_spent_gbp"] if loyalty else 0) or 0)
+    return {
+        "customerSince": loyalty["customer_since"] if loyalty else None,
+        "monthsActive": months_active,
+        "totalSpent": total_spent,
+        "loyaltyLevel": resolve_loyalty_level(months_active),
+    }
+
+
+def get_account_performance_summary(conn: sqlite3.Connection, account_id: int) -> dict[str, dict[str, float]]:
+    now = utc_now()
+    today = now.strftime("%Y-%m-%d")
+    week_start = (now - timedelta(days=7)).strftime("%Y-%m-%d")
+    month_start = (now - timedelta(days=30)).strftime("%Y-%m-%d")
+
+    daily = conn.execute(
+        "SELECT COALESCE(SUM(invested_amount),0) AS invested, COALESCE(SUM(profit_amount),0) AS profit FROM account_performance_snapshots WHERE account_id = ? AND period_day = ?",
+        (account_id, today),
+    ).fetchone()
+    weekly = conn.execute(
+        "SELECT COALESCE(SUM(invested_amount),0) AS invested, COALESCE(SUM(profit_amount),0) AS profit FROM account_performance_snapshots WHERE account_id = ? AND period_day >= ?",
+        (account_id, week_start),
+    ).fetchone()
+    monthly = conn.execute(
+        "SELECT COALESCE(SUM(invested_amount),0) AS invested, COALESCE(SUM(profit_amount),0) AS profit FROM account_performance_snapshots WHERE account_id = ? AND period_day >= ?",
+        (account_id, month_start),
+    ).fetchone()
+    lifetime = conn.execute(
+        "SELECT COALESCE(SUM(invested_amount),0) AS invested, COALESCE(SUM(profit_amount),0) AS profit FROM account_performance_snapshots WHERE account_id = ?",
+        (account_id,),
+    ).fetchone()
+    return {
+        "daily": {"invested": float(daily["invested"] or 0), "profit": float(daily["profit"] or 0)},
+        "weekly": {"invested": float(weekly["invested"] or 0), "profit": float(weekly["profit"] or 0)},
+        "monthly": {"invested": float(monthly["invested"] or 0), "profit": float(monthly["profit"] or 0)},
+        "lifetime": {"invested": float(lifetime["invested"] or 0), "profit": float(lifetime["profit"] or 0)},
+    }
+
+
+def build_display_name_policy(profile_row: sqlite3.Row | None) -> dict[str, Any]:
+    changed_at_raw = None
+    if profile_row is not None and "display_name_changed_at" in profile_row.keys():
+        changed_at_raw = profile_row["display_name_changed_at"]
+    changed_at = parse_db_timestamp(changed_at_raw)
+    available_at = changed_at + timedelta(days=DISPLAY_NAME_CHANGE_COOLDOWN_DAYS) if changed_at else None
+    return {
+        "canChange": available_at is None or utc_now() >= available_at,
+        "availableAt": format_db_timestamp(available_at),
+        "cooldownDays": DISPLAY_NAME_CHANGE_COOLDOWN_DAYS,
+    }
+
+
+def are_accounts_connected(conn: sqlite3.Connection, left_account_id: int, right_account_id: int) -> bool:
+    if left_account_id <= 0 or right_account_id <= 0:
+        return False
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM community_network
+        WHERE (account_id = ? AND target_account_id = ?) OR (account_id = ? AND target_account_id = ?)
+        LIMIT 1
+        """,
+        (left_account_id, right_account_id, right_account_id, left_account_id),
+    ).fetchone()
+    return row is not None
+
+
+def get_connection_state(conn: sqlite3.Connection, viewer_account_id: int | None, target_account_id: int) -> str:
+    if viewer_account_id is None:
+        return "guest"
+    if viewer_account_id == target_account_id:
+        return "self"
+    if are_accounts_connected(conn, viewer_account_id, target_account_id):
+        return "connected"
+    incoming = conn.execute(
+        "SELECT 1 FROM community_connection_requests WHERE requester_account_id = ? AND recipient_account_id = ? AND status = 'pending' LIMIT 1",
+        (target_account_id, viewer_account_id),
+    ).fetchone()
+    if incoming is not None:
+        return "incoming"
+    outgoing = conn.execute(
+        "SELECT 1 FROM community_connection_requests WHERE requester_account_id = ? AND recipient_account_id = ? AND status = 'pending' LIMIT 1",
+        (viewer_account_id, target_account_id),
+    ).fetchone()
+    if outgoing is not None:
+        return "outgoing"
+    return "none"
+
+
+def get_connection_counts(conn: sqlite3.Connection, account_id: int) -> dict[str, int]:
+    connections = conn.execute(
+        "SELECT COUNT(*) AS count FROM community_network WHERE account_id = ?",
+        (account_id,),
+    ).fetchone()
+    incoming = conn.execute(
+        "SELECT COUNT(*) AS count FROM community_connection_requests WHERE recipient_account_id = ? AND status = 'pending'",
+        (account_id,),
+    ).fetchone()
+    outgoing = conn.execute(
+        "SELECT COUNT(*) AS count FROM community_connection_requests WHERE requester_account_id = ? AND status = 'pending'",
+        (account_id,),
+    ).fetchone()
+    return {
+        "connections": int((connections["count"] if connections else 0) or 0),
+        "incoming": int((incoming["count"] if incoming else 0) or 0),
+        "outgoing": int((outgoing["count"] if outgoing else 0) or 0),
+    }
+
+
+def accept_connection_request(conn: sqlite3.Connection, requester_account_id: int, recipient_account_id: int) -> None:
+    conn.execute(
+        "UPDATE community_connection_requests SET status = 'accepted', responded_at = CURRENT_TIMESTAMP WHERE requester_account_id = ? AND recipient_account_id = ? AND status = 'pending'",
+        (requester_account_id, recipient_account_id),
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO community_network (account_id, target_account_id) VALUES (?, ?)",
+        (requester_account_id, recipient_account_id),
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO community_network (account_id, target_account_id) VALUES (?, ?)",
+        (recipient_account_id, requester_account_id),
+    )
+
+
+def get_last_whisper_previews(conn: sqlite3.Connection, account_id: int) -> dict[int, dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT m.message_body, m.created_at,
+               CASE WHEN m.sender_account_id = ? THEN m.recipient_account_id ELSE m.sender_account_id END AS counterpart_id,
+               CASE WHEN m.sender_account_id = ? THEN 1 ELSE 0 END AS is_mine
+        FROM chat_messages m
+        WHERE m.channel_type = 'whisper'
+          AND m.is_deleted = 0
+          AND (m.sender_account_id = ? OR m.recipient_account_id = ?)
+        ORDER BY m.id DESC
+        LIMIT 400
+        """,
+        (account_id, account_id, account_id, account_id),
+    ).fetchall()
+    previews: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        counterpart_id = int(row["counterpart_id"] or 0)
+        if counterpart_id <= 0 or counterpart_id in previews:
+            continue
+        previews[counterpart_id] = {
+            "text": row["message_body"],
+            "createdAt": row["created_at"],
+            "isMine": bool(row["is_mine"]),
+        }
+    return previews
+
+
+def get_community_member_snapshot(
+    conn: sqlite3.Connection,
+    target_account_id: int,
+    viewer_account_id: int | None = None,
+    viewer_is_admin: bool = False,
+) -> dict[str, Any] | None:
+    row = conn.execute(
+        """
+        SELECT a.id, a.username,
+               cp.display_name, cp.avatar_url, cp.bio, cp.privacy_mode, cp.show_on_leaderboard, cp.user_rank, cp.ignore_whisper,
+               ab.balance_amount, ab.total_invested, ab.total_profit, ab.updated_at
+        FROM accounts a
+        LEFT JOIN community_profiles cp ON cp.account_id = a.id
+        LEFT JOIN account_balances ab ON ab.account_id = a.id
+        WHERE a.id = ?
+        """,
+        (target_account_id,),
+    ).fetchone()
+    if row is None:
+        return None
+
+    is_owner = viewer_account_id is not None and int(viewer_account_id) == target_account_id
+    can_view_stats = (row["privacy_mode"] or "public") != "private" or is_owner or viewer_is_admin
+    connection_counts = get_connection_counts(conn, target_account_id)
+    performance = get_account_performance_summary(conn, target_account_id) if can_view_stats else None
+    top_tier = get_active_tier_number(conn, target_account_id)
+    network_state = get_connection_state(conn, viewer_account_id, target_account_id)
+    can_whisper = (
+        viewer_account_id is not None
+        and viewer_account_id != target_account_id
+        and (network_state == "connected" or int(row["ignore_whisper"] or 0) == 0)
+    )
+
+    payload: dict[str, Any] = {
+        "profile": {
+            "id": target_account_id,
+            "username": row["username"],
+            "displayName": row["display_name"] or row["username"],
+            "avatarUrl": row["avatar_url"] or COMMUNITY_DEFAULT_AVATAR,
+            "bio": row["bio"] or "",
+            "privacyMode": row["privacy_mode"] or "public",
+            "showOnLeaderboard": bool(row["show_on_leaderboard"]) if row["show_on_leaderboard"] is not None else True,
+            "userRank": row["user_rank"] or "",
+            "tierBadge": f"Tier {top_tier}" if top_tier > 0 else "No Tier",
+            "connectionsCount": connection_counts["connections"],
+        },
+        "badges": build_badges_for_account(conn, target_account_id, include_preview=BADGE_PREVIEW_ENABLED and is_owner),
+        "networkState": network_state,
+        "canWhisper": can_whisper,
+        "visibility": "public" if can_view_stats else "private",
+    }
+    if can_view_stats:
+        payload["balance"] = {
+            "current": float((row["balance_amount"] if row else COMMUNITY_DEFAULT_BALANCE) or 0),
+            "invested": float((row["total_invested"] if row else 0) or 0),
+            "profit": float((row["total_profit"] if row else 0) or 0),
+            "updatedAt": row["updated_at"],
+        }
+        payload["performance"] = performance
+    return payload
+
+
+def build_preview_badges_for_account(conn: sqlite3.Connection, account_id: int) -> list[dict[str, Any]]:
+    account_row = conn.execute("SELECT verified FROM accounts WHERE id = ?", (account_id,)).fetchone()
+    if account_row is None:
+        return []
+
+    preview_badges: list[dict[str, Any]] = [
+        {
+            "code": "preview_bronze_member",
+            "label": "Bronze Member",
+            "shortLabel": "BRZ",
+            "icon": "B",
+            "tone": "bronze",
+            "achievement": "Preview badge design enabled on your account.",
+            "group": "preview",
+        }
+    ]
+
+    if bool(account_row["verified"]):
+        preview_badges.append(
+            {
+                "code": "verified_account",
+                "label": "Verified Account",
+                "shortLabel": "VER",
+                "icon": "V",
+                "tone": "verified",
+                "achievement": "Confirmed account identity with trusted access.",
+                "group": "trust",
+            }
+        )
+
+    return preview_badges
+
+
+def get_custom_badges_for_account(conn: sqlite3.Connection, account_id: int) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT code, label, short_label, icon, tone, achievement, badge_group
+        FROM account_custom_badges
+        WHERE account_id = ?
+        ORDER BY display_order ASC, id ASC
+        """,
+        (account_id,),
+    ).fetchall()
+    return [
+        {
+            "code": row["code"],
+            "label": row["label"],
+            "shortLabel": row["short_label"],
+            "icon": row["icon"],
+            "tone": row["tone"],
+            "achievement": row["achievement"],
+            "group": row["badge_group"],
+        }
+        for row in rows
+    ]
+
+
+def build_badges_for_account(conn: sqlite3.Connection, account_id: int, include_preview: bool = False) -> list[dict[str, Any]]:
+    custom_badges = get_custom_badges_for_account(conn, account_id)
+    badges: list[dict[str, Any]] = list(custom_badges)
+    active_tier = get_active_tier_number(conn, account_id)
+    loyalty = get_loyalty_snapshot(conn, account_id)
+    months_active = int(loyalty["monthsActive"] or 0)
+    total_spent = float(loyalty["totalSpent"] or 0)
+    loyalty_level = str(loyalty["loyaltyLevel"] or "bronze")
+
+    if months_active >= LOYALTY_MEMBER_BADGE_MONTHS:
+        badges.append(
+            {
+                "code": f"loyalty_{loyalty_level}",
+                "label": f"{loyalty_level.title()} Loyalty",
+                "shortLabel": loyalty_level.title(),
+                "icon": "L",
+                "tone": loyalty_level,
+                "achievement": f"{months_active} active month{'s' if months_active != 1 else ''}",
+                "group": "loyalty",
+            }
+        )
+    if active_tier >= 1:
+        badges.append(
+            {
+                "code": f"tier_{active_tier}",
+                "label": f"Tier {active_tier} Member",
+                "shortLabel": f"T{active_tier}",
+                "icon": "T",
+                "tone": "tier",
+                "achievement": f"Unlocked tier {active_tier} member access",
+                "group": "membership",
+            }
+        )
     if months_active >= LOYALTY_TRUSTED_BADGE_MONTHS:
-        badges.append({"code": "trusted_6m", "label": "Trusted 6 Months"})
+        badges.append(
+            {
+                "code": "trusted_6m",
+                "label": "Trusted 6 Months",
+                "shortLabel": "6M",
+                "icon": "6",
+                "tone": "emerald",
+                "achievement": "Stayed active for 6 months",
+                "group": "milestone",
+            }
+        )
     if months_active >= LOYALTY_VETERAN_BADGE_MONTHS:
-        badges.append({"code": "veteran_12m", "label": "Veteran 12 Months"})
+        badges.append(
+            {
+                "code": "veteran_12m",
+                "label": "Veteran 12 Months",
+                "shortLabel": "1Y",
+                "icon": "1Y",
+                "tone": "royal",
+                "achievement": "Held membership for 12 months",
+                "group": "milestone",
+            }
+        )
     if total_spent >= LOYALTY_SUPPORTER_SPEND_GBP:
-        badges.append({"code": "supporter_100", "label": "Top Supporter"})
+        badges.append(
+            {
+                "code": "supporter_100",
+                "label": "Top Supporter",
+                "shortLabel": "GBP",
+                "icon": "GBP",
+                "tone": "gold",
+                "achievement": f"Invested GBP {total_spent:.2f} into the platform",
+                "group": "support",
+            }
+        )
+
+    if include_preview:
+        existing_codes = {str(badge.get("code") or "") for badge in badges}
+        existing_tones = {str(badge.get("tone") or "") for badge in badges}
+        preview_badges: list[dict[str, Any]] = []
+        for badge in build_preview_badges_for_account(conn, account_id):
+            if badge["code"] in existing_codes:
+                continue
+            if badge["tone"] == "bronze" and "bronze" in existing_tones:
+                continue
+            preview_badges.append(badge)
+        badges = custom_badges + preview_badges + badges[len(custom_badges):]
+
     return badges
 
 
@@ -1398,7 +1921,10 @@ def init_db() -> None:
                 phone_number TEXT,
                 discord_username TEXT,
                 discord_tag TEXT,
-                verified INTEGER NOT NULL DEFAULT 0,
+                verified INTEGER NOT NULL DEFAULT 1,
+                is_admin INTEGER NOT NULL DEFAULT 0,
+                data_consent_accepted INTEGER NOT NULL DEFAULT 0,
+                data_consent_accepted_at TIMESTAMP,
                 verification_token TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -1507,6 +2033,8 @@ def init_db() -> None:
                 confidence_label TEXT NOT NULL,
                 session_label TEXT NOT NULL,
                 thesis TEXT NOT NULL,
+                signal_time_utc TEXT NOT NULL DEFAULT '12:00',
+                timer_minutes INTEGER NOT NULL DEFAULT 90,
                 base_currency_code TEXT NOT NULL DEFAULT 'USD',
                 status TEXT NOT NULL DEFAULT 'open',
                 is_free INTEGER NOT NULL DEFAULT 0,
@@ -1602,6 +2130,7 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 account_id INTEGER NOT NULL UNIQUE,
                 display_name TEXT,
+                display_name_changed_at TIMESTAMP,
                 avatar_url TEXT,
                 bio TEXT,
                 privacy_mode TEXT NOT NULL DEFAULT 'public',
@@ -1699,6 +2228,40 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS community_connection_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                requester_account_id INTEGER NOT NULL,
+                recipient_account_id INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                responded_at TIMESTAMP,
+                UNIQUE(requester_account_id, recipient_account_id),
+                FOREIGN KEY (requester_account_id) REFERENCES accounts(id),
+                FOREIGN KEY (recipient_account_id) REFERENCES accounts(id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS account_custom_badges (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL,
+                code TEXT NOT NULL,
+                label TEXT NOT NULL,
+                short_label TEXT NOT NULL,
+                icon TEXT,
+                tone TEXT NOT NULL DEFAULT 'royal',
+                achievement TEXT,
+                badge_group TEXT NOT NULL DEFAULT 'custom',
+                display_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(account_id, code),
+                FOREIGN KEY (account_id) REFERENCES accounts(id)
+            )
+            """
+        )
 
         ensure_column(conn, "accounts", "zipcode", "TEXT")
         ensure_column(conn, "accounts", "address", "TEXT")
@@ -1707,6 +2270,9 @@ def init_db() -> None:
         ensure_column(conn, "accounts", "discord_username", "TEXT")
         ensure_column(conn, "accounts", "discord_tag", "TEXT")
         ensure_column(conn, "accounts", "verified", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "accounts", "is_admin", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "accounts", "data_consent_accepted", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "accounts", "data_consent_accepted_at", "TIMESTAMP")
         ensure_column(conn, "accounts", "verification_token", "TEXT")
         ensure_column(conn, "accounts", "verification_token_created_at", "TIMESTAMP")
         ensure_column(conn, "accounts", "verification_token_hash", "TEXT")
@@ -1742,8 +2308,11 @@ def init_db() -> None:
         ensure_column(conn, "purchases", "renewal_reminder_sent", "INTEGER DEFAULT 0")
         ensure_column(conn, "purchases", "last_renewed_at", "TIMESTAMP")
         ensure_column(conn, "daily_signals", "is_free", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "daily_signals", "signal_time_utc", "TEXT NOT NULL DEFAULT '12:00'")
+        ensure_column(conn, "daily_signals", "timer_minutes", "INTEGER NOT NULL DEFAULT 90")
 
         ensure_column(conn, "community_profiles", "display_name", "TEXT")
+        ensure_column(conn, "community_profiles", "display_name_changed_at", "TIMESTAMP")
         ensure_column(conn, "community_profiles", "avatar_url", "TEXT")
         ensure_column(conn, "community_profiles", "bio", "TEXT")
         ensure_column(conn, "community_profiles", "privacy_mode", "TEXT NOT NULL DEFAULT 'public'")
@@ -1759,18 +2328,23 @@ def init_db() -> None:
         ensure_column(conn, "account_balances", "total_invested", "REAL NOT NULL DEFAULT 0")
         ensure_column(conn, "account_balances", "total_profit", "REAL NOT NULL DEFAULT 0")
 
+        conn.execute("DROP TRIGGER IF EXISTS trg_accounts_force_verified_after_insert")
+        conn.execute("DROP TRIGGER IF EXISTS trg_accounts_force_verified_after_update")
+
         existing_usernames = {
             str(row["username"]).strip().lower()
             for row in conn.execute("SELECT username FROM accounts WHERE username IS NOT NULL AND trim(username) != ''").fetchall()
         }
-        legacy_account_rows = conn.execute("SELECT id, email, username, verified FROM accounts").fetchall()
+        legacy_account_rows = conn.execute("SELECT id, email, username, verified, is_admin FROM accounts").fetchall()
         for row in legacy_account_rows:
             username_value = str(row["username"] or "").strip().lower()
             if not username_value:
                 username_value = build_legacy_username(row["email"], int(row["id"]), existing_usernames)
+            is_admin = 1 if bool(row["is_admin"]) or is_auto_admin_email(row["email"]) or is_admin_username(username_value) else 0
+            verified_value = 1
             conn.execute(
-                "UPDATE accounts SET username = ?, verified = 1, verification_token = NULL, verification_token_hash = NULL, verification_token_created_at = NULL WHERE id = ?",
-                (username_value, int(row["id"])),
+                "UPDATE accounts SET username = ?, verified = ?, is_admin = ?, verification_token = NULL, verification_token_hash = NULL, verification_token_created_at = NULL WHERE id = ?",
+                (username_value, verified_value, is_admin, int(row["id"])),
             )
 
             conn.execute(
@@ -1782,35 +2356,50 @@ def init_db() -> None:
                 (int(row["id"]), COMMUNITY_DEFAULT_BALANCE),
             )
 
-        conn.execute(
+        founder_rows = conn.execute(
             """
-            CREATE TRIGGER IF NOT EXISTS trg_accounts_force_verified_after_insert
-            AFTER INSERT ON accounts
-            BEGIN
-                UPDATE accounts
-                SET verified = 1,
-                    verification_token = NULL,
-                    verification_token_hash = NULL,
-                    verification_token_created_at = NULL
-                WHERE id = NEW.id;
-            END;
+            SELECT id
+            FROM accounts
+            WHERE lower(email) LIKE 'dylan.reiziger%'
+               OR lower(full_name) LIKE 'dylan reizig%'
+               OR lower(username) IN ('krok', 'krokonl')
             """
-        )
-        conn.execute(
-            """
-            CREATE TRIGGER IF NOT EXISTS trg_accounts_force_verified_after_update
-            AFTER UPDATE OF verified ON accounts
-            WHEN NEW.verified = 0
-            BEGIN
-                UPDATE accounts
-                SET verified = 1,
-                    verification_token = NULL,
-                    verification_token_hash = NULL,
-                    verification_token_created_at = NULL
-                WHERE id = NEW.id;
-            END;
-            """
-        )
+        ).fetchall()
+        for row in founder_rows:
+            conn.execute(
+                """
+                INSERT INTO account_custom_badges (
+                    account_id,
+                    code,
+                    label,
+                    short_label,
+                    icon,
+                    tone,
+                    achievement,
+                    badge_group,
+                    display_order
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(account_id, code) DO UPDATE SET
+                    label = excluded.label,
+                    short_label = excluded.short_label,
+                    icon = excluded.icon,
+                    tone = excluded.tone,
+                    achievement = excluded.achievement,
+                    badge_group = excluded.badge_group,
+                    display_order = excluded.display_order
+                """,
+                (
+                    int(row["id"]),
+                    "vault_founder",
+                    "Vault Founder",
+                    "FND",
+                    "F",
+                    "royal",
+                    "Builder account with direct VaultSignals ownership and design authority.",
+                    "founder",
+                    -100,
+                ),
+            )
 
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_username ON accounts(username)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_accounts_email ON accounts(email)")
@@ -1831,6 +2420,8 @@ def init_db() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_whisper_time ON chat_messages(sender_account_id, recipient_account_id, created_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_suspensions_account ON chat_suspensions(account_id, suspended_until)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_network_account_target ON community_network(account_id, target_account_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_connection_requests_requester ON community_connection_requests(requester_account_id, status, created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_connection_requests_recipient ON community_connection_requests(recipient_account_id, status, created_at)")
 
         # Backfill secure columns for existing rows.
         account_rows = conn.execute(
@@ -1867,12 +2458,62 @@ def init_db() -> None:
             )
 
         conn.execute("DELETE FROM auth_tokens WHERE expires_at <= CURRENT_TIMESTAMP")
+        conn.execute("DELETE FROM chat_messages WHERE channel_type = 'global'")
         
         # Backfill is_free for existing signals - mark tier 1 signals as free
         try:
             conn.execute("UPDATE daily_signals SET is_free = 1 WHERE tier_number = ? AND is_free = 0", (TIER_NUMBER_MIN,))
         except Exception as exc:
             logger.warning("Skipping daily_signals is_free backfill during migration: %s", exc)
+
+        try:
+            blueprint_by_key = {
+                (
+                    int(signal.get("tier_number", 0) or 0),
+                    str(signal.get("asset_symbol", "") or "").strip().upper(),
+                    str(signal.get("session_label", "") or "").strip(),
+                ): signal
+                for signal in DAILY_SIGNAL_BLUEPRINTS
+            }
+            signal_rows = conn.execute(
+                "SELECT id, tier_number, asset_symbol, session_label, signal_time_utc, timer_minutes FROM daily_signals"
+            ).fetchall()
+            for row in signal_rows:
+                blueprint_signal = blueprint_by_key.get(
+                    (
+                        int(row["tier_number"] or 0),
+                        str(row["asset_symbol"] or "").strip().upper(),
+                        str(row["session_label"] or "").strip(),
+                    )
+                )
+                mapped_time = DEFAULT_SIGNAL_TIME_BY_SESSION.get(
+                    str(row["session_label"] or "").strip(),
+                    DEFAULT_SIGNAL_TIME_BY_TIER.get(int(row["tier_number"] or 0), DEFAULT_SIGNAL_TIME_BY_SESSION["Session"]),
+                )
+                if blueprint_signal:
+                    mapped_time = normalize_signal_time_utc(
+                        blueprint_signal.get("signal_time_utc"),
+                        blueprint_signal.get("session_label"),
+                        int(blueprint_signal.get("tier_number", 0) or 0),
+                    )
+                current_time = str(row["signal_time_utc"] or "").strip()
+                resolved_time = normalize_signal_time_utc(current_time, row["session_label"], int(row["tier_number"] or 0))
+                if current_time == DEFAULT_SIGNAL_TIME_BY_SESSION["Session"] and mapped_time != DEFAULT_SIGNAL_TIME_BY_SESSION["Session"]:
+                    resolved_time = mapped_time
+                mapped_timer = normalize_signal_timer_minutes(
+                    blueprint_signal.get("timer_minutes") if blueprint_signal else row["timer_minutes"]
+                )
+                current_timer = int(row["timer_minutes"] or DEFAULT_SIGNAL_TIMER_MINUTES)
+                resolved_timer = normalize_signal_timer_minutes(current_timer)
+                if current_timer == DEFAULT_SIGNAL_TIMER_MINUTES and mapped_timer != DEFAULT_SIGNAL_TIMER_MINUTES:
+                    resolved_timer = mapped_timer
+                if resolved_time != current_time or resolved_timer != int(row["timer_minutes"] or DEFAULT_SIGNAL_TIMER_MINUTES):
+                    conn.execute(
+                        "UPDATE daily_signals SET signal_time_utc = ?, timer_minutes = ? WHERE id = ?",
+                        (resolved_time, resolved_timer, int(row["id"])),
+                    )
+        except Exception as exc:
+            logger.warning("Skipping daily_signals timing backfill during migration: %s", exc)
         
         ensure_daily_signals(conn)
 
@@ -1904,7 +2545,12 @@ def disable_static_cache(response: Response) -> Response:
 
 @app.route("/")
 def index() -> str:
-    return render_template("index.html", tiers=TIERS, is_logged_in=(g.current_account is not None))
+    return render_template(
+        "index.html",
+        tiers=TIERS,
+        is_logged_in=(g.current_account is not None),
+        performance_timeline=get_performance_timeline(),
+    )
 
 
 @app.route("/price")
@@ -2046,7 +2692,7 @@ def pro_signals() -> tuple[Any, int]:
 def admin_signals_page() -> str:
     if g.current_account is None:
         return render_template("admin_signals.html", access_denied=True, denied_reason="login", selected_day=utc_now().strftime("%Y-%m-%d"))
-    if not is_admin_username(g.current_account["username"]):
+    if not is_admin_account(g.current_account):
         return render_template("admin_signals.html", access_denied=True, denied_reason="role", selected_day=utc_now().strftime("%Y-%m-%d"))
     return render_template("admin_signals.html", access_denied=False, denied_reason="", selected_day=utc_now().strftime("%Y-%m-%d"))
 
@@ -2064,7 +2710,7 @@ def admin_list_signals() -> tuple[Any, int]:
     with get_db() as conn:
         ensure_daily_signals(conn, signal_day)
         rows = conn.execute(
-            "SELECT id, signal_day, tier_number, asset_symbol, market, direction, entry_price, target_price, stop_price, confidence_label, session_label, thesis, status, created_at FROM daily_signals WHERE signal_day = ? ORDER BY tier_number ASC, id ASC",
+            "SELECT id, signal_day, tier_number, asset_symbol, market, direction, entry_price, target_price, stop_price, confidence_label, session_label, thesis, signal_time_utc, timer_minutes, status, created_at FROM daily_signals WHERE signal_day = ? ORDER BY tier_number ASC, id ASC",
             (signal_day,),
         ).fetchall()
 
@@ -2086,6 +2732,8 @@ def admin_list_signals() -> tuple[Any, int]:
                     "confidenceLabel": row["confidence_label"],
                     "sessionLabel": row["session_label"],
                     "thesis": row["thesis"],
+                    "signalTimeUtc": normalize_signal_time_utc(row["signal_time_utc"], row["session_label"], int(row["tier_number"] or 0)),
+                    "timerMinutes": normalize_signal_timer_minutes(row["timer_minutes"]),
                     "status": row["status"],
                     "createdAt": row["created_at"],
                 }
@@ -2110,8 +2758,11 @@ def parse_admin_signal_payload(payload: dict[str, Any]) -> tuple[dict[str, Any] 
         entry_price = float(payload.get("entryPrice", 0))
         target_price = float(payload.get("targetPrice", 0))
         stop_price = float(payload.get("stopPrice", 0))
+        timer_minutes = normalize_signal_timer_minutes(payload.get("timerMinutes", DEFAULT_SIGNAL_TIMER_MINUTES))
     except (TypeError, ValueError):
         return None, (jsonify({"ok": False, "message": "Tier and prices must be valid numbers."}), 400)
+
+    signal_time_utc = normalize_signal_time_utc(payload.get("signalTimeUtc"), session_label, tier_number)
 
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", signal_day):
         return None, (jsonify({"ok": False, "message": "Use day format YYYY-MM-DD."}), 400)
@@ -2136,6 +2787,8 @@ def parse_admin_signal_payload(payload: dict[str, Any]) -> tuple[dict[str, Any] 
         "confidence_label": confidence_label,
         "session_label": session_label,
         "thesis": thesis,
+        "signal_time_utc": signal_time_utc,
+        "timer_minutes": timer_minutes,
         "status": status,
     }, None
 
@@ -2155,7 +2808,7 @@ def admin_create_signal() -> tuple[Any, int]:
 
     with get_db() as conn:
         conn.execute(
-            "INSERT INTO daily_signals (signal_day, tier_number, asset_symbol, market, direction, entry_price, target_price, stop_price, confidence_label, session_label, thesis, base_currency_code, status, is_free) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO daily_signals (signal_day, tier_number, asset_symbol, market, direction, entry_price, target_price, stop_price, confidence_label, session_label, thesis, signal_time_utc, timer_minutes, base_currency_code, status, is_free) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 parsed_payload["signal_day"],
                 parsed_payload["tier_number"],
@@ -2168,6 +2821,8 @@ def admin_create_signal() -> tuple[Any, int]:
                 parsed_payload["confidence_label"],
                 parsed_payload["session_label"],
                 parsed_payload["thesis"],
+                parsed_payload["signal_time_utc"],
+                parsed_payload["timer_minutes"],
                 "USD",
                 parsed_payload["status"],
                 is_free,
@@ -2198,7 +2853,7 @@ def admin_update_signal(signal_id: int) -> tuple[Any, int]:
             UPDATE daily_signals
             SET signal_day = ?, tier_number = ?, asset_symbol = ?, market = ?, direction = ?,
                 entry_price = ?, target_price = ?, stop_price = ?, confidence_label = ?,
-                session_label = ?, thesis = ?, status = ?
+                session_label = ?, thesis = ?, signal_time_utc = ?, timer_minutes = ?, status = ?
             WHERE id = ?
             """,
             (
@@ -2213,6 +2868,8 @@ def admin_update_signal(signal_id: int) -> tuple[Any, int]:
                 parsed_payload["confidence_label"],
                 parsed_payload["session_label"],
                 parsed_payload["thesis"],
+                parsed_payload["signal_time_utc"],
+                parsed_payload["timer_minutes"],
                 parsed_payload["status"],
                 signal_id,
             ),
@@ -2295,13 +2952,19 @@ def create_account() -> tuple[Any, int]:
     full_name = str(payload.get("fullName", "")).strip()
     email = str(payload.get("email", "")).strip().lower()
     password = str(payload.get("password", ""))
+    remember_me = bool(payload.get("rememberMe", False))
     zipcode = str(payload.get("zipcode", "")).strip()
     address = str(payload.get("address", "")).strip()
     discord_username = normalize_discord_username(str(payload.get("discordUsername", "")))
+    consent_to_data_storage = bool(payload.get("consentToDataStorage", False))
 
     if not username or not full_name or not email or not password or not zipcode or not address:
         log_security_event(None, "account_create", "validation_failed")
         return jsonify({"ok": False, "message": "All fields are required."}), 400
+
+    if not consent_to_data_storage:
+        log_security_event(None, "account_create", "consent_missing")
+        return jsonify({"ok": False, "message": "You must consent to Vault Signals storing your submitted account data before creating an account."}), 400
 
     if len(password) < 8:
         log_security_event(None, "account_create", "validation_failed")
@@ -2327,6 +2990,8 @@ def create_account() -> tuple[Any, int]:
         return jsonify({"ok": False, "message": "Enter a valid email address."}), 400
 
     password_hash = generate_password_hash(password)
+    is_admin = 1 if is_auto_admin_email(email) else 0
+    verified = 1
 
     try:
         with get_db() as conn:
@@ -2336,7 +3001,7 @@ def create_account() -> tuple[Any, int]:
                 return jsonify({"ok": False, "message": "Username or email already in use."}), 409
 
             conn.execute(
-                "INSERT INTO accounts (username, full_name, full_name_enc, email, password_hash, zipcode, zipcode_enc, address, address_enc, discord_username, discord_username_enc, discord_tag, verified, verification_token_hash, verification_token_created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+                "INSERT INTO accounts (username, full_name, full_name_enc, email, password_hash, zipcode, zipcode_enc, address, address_enc, discord_username, discord_username_enc, discord_tag, verified, is_admin, data_consent_accepted, data_consent_accepted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
                 (
                     username,
                     full_name,
@@ -2350,12 +3015,14 @@ def create_account() -> tuple[Any, int]:
                     discord_username or None,
                     encrypt_value(discord_username) if discord_username else None,
                     None,
+                    verified,
+                    is_admin,
                     1,
-                    None,
                 ),
             )
 
             created_account = conn.execute("SELECT id FROM accounts WHERE email = ?", (email,)).fetchone()
+            created_account_id: int | None = None
             if created_account:
                 created_account_id = int(created_account["id"])
                 sync_discord_verification_for_account(conn, created_account_id, discord_username)
@@ -2370,7 +3037,25 @@ def create_account() -> tuple[Any, int]:
         log_security_event(None, "account_create", "conflict")
         return jsonify({"ok": False, "message": "Username or email already in use."}), 409
 
-    return jsonify({"ok": True, "message": "Account created. You can now log in immediately."}), 201
+    if created_account_id is None:
+        return jsonify({"ok": False, "message": "Account was created but could not be loaded. Please log in."}), 500
+
+    with get_db() as conn:
+        created_user = fetch_account_by_id(conn, created_account_id)
+
+    if created_user is None:
+        return jsonify({"ok": False, "message": "Account was created but could not be loaded. Please log in."}), 500
+
+    message = "Admin account created. You are now logged in." if is_admin else "Account created. You are now logged in and can buy signal tiers when you are ready."
+    response = jsonify(
+        {
+            "ok": True,
+            "message": message,
+            "user": serialize_account(created_user),
+            "currency": resolve_currency_preference(created_user),
+        }
+    )
+    return attach_auth_state(response, created_account_id, remember_me), 201
 
 
 @app.post("/api/login")
@@ -2432,27 +3117,11 @@ def resend_verification_email() -> tuple[Any, int]:
         return jsonify({"ok": False, "message": "Enter a valid email address."}), 400
 
     with get_db() as conn:
-        account = conn.execute("SELECT id, verified FROM accounts WHERE email = ?", (email,)).fetchone()
+        account = conn.execute("SELECT id FROM accounts WHERE email = ?", (email,)).fetchone()
         if account is None:
             return jsonify({"ok": False, "message": "Account not found for this email."}), 404
-        if int(account["verified"] or 0) == 1:
-            return jsonify({"ok": True, "message": "This email is already verified."}), 200
 
-        verification_token = uuid.uuid4().hex
-        conn.execute(
-            "UPDATE accounts SET verification_token_hash = ?, verification_token_created_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (hash_token(verification_token), int(account["id"])),
-        )
-
-    email_sent = send_verification_email(email, verification_token)
-    response_payload: dict[str, Any] = {
-        "ok": True,
-        "message": "Verification email sent. Check your inbox.",
-    }
-    if not email_sent:
-        response_payload["message"] = "Email delivery is not configured locally, so use the verification link below."
-        response_payload["verificationUrl"] = build_verification_url(verification_token)
-    return jsonify(response_payload), 200
+    return jsonify({"ok": True, "message": "Account access is already enabled. Sign in with your email and password to continue."}), 200
 
 
 @app.post("/api/auth/change-unverified-email")
@@ -2470,36 +3139,28 @@ def change_unverified_email() -> tuple[Any, int]:
         return jsonify({"ok": False, "message": "Enter a valid new email address."}), 400
 
     with get_db() as conn:
-        account = conn.execute("SELECT id, password_hash, verified FROM accounts WHERE email = ?", (email,)).fetchone()
+        account = conn.execute("SELECT id, password_hash FROM accounts WHERE email = ?", (email,)).fetchone()
         if account is None or not check_password_hash(account["password_hash"], password):
             return jsonify({"ok": False, "message": "Invalid email or password."}), 401
-        if int(account["verified"] or 0) == 1:
-            return jsonify({"ok": False, "message": "Account is already verified. Email change here is only for unverified accounts."}), 400
 
         email_conflict = conn.execute("SELECT id FROM accounts WHERE email = ? AND id != ?", (new_email, int(account["id"]))).fetchone()
         if email_conflict is not None:
             return jsonify({"ok": False, "message": "New email is already in use."}), 409
 
-        verification_token = uuid.uuid4().hex
         conn.execute(
             """
             UPDATE accounts
-            SET email = ?, verified = 0, verification_token_hash = ?, verification_token_created_at = CURRENT_TIMESTAMP
+            SET email = ?, verified = 1, verification_token = NULL, verification_token_hash = NULL, verification_token_created_at = NULL
             WHERE id = ?
             """,
-            (new_email, hash_token(verification_token), int(account["id"])),
+            (new_email, int(account["id"])),
         )
 
-    email_sent = send_verification_email(new_email, verification_token)
-    response_payload: dict[str, Any] = {
+    return jsonify({
         "ok": True,
-        "message": "Email updated. Verify the new email before logging in.",
+        "message": "Email updated. You can now sign in with the new email address.",
         "newEmail": new_email,
-    }
-    if not email_sent:
-        response_payload["message"] = "Email updated. Email delivery is not configured locally, so use the verification link below."
-        response_payload["verificationUrl"] = build_verification_url(verification_token)
-    return jsonify(response_payload), 200
+    }), 200
 
 
 @app.post("/api/logout")
@@ -2596,8 +3257,9 @@ def get_account_profile() -> tuple[Any, int]:
     with get_db() as conn:
         ensure_community_profile(conn, account_id, str(g.current_account["username"] or "member"))
         row = fetch_account_profile_by_id(conn, account_id)
+        badges = build_badges_for_account(conn, account_id, include_preview=BADGE_PREVIEW_ENABLED)
 
-    return jsonify({"ok": True, "profile": serialize_account_profile(row)}), 200
+    return jsonify({"ok": True, "profile": serialize_account_profile(row), "badges": badges}), 200
 
 
 @app.patch("/api/account/profile")
@@ -2701,8 +3363,9 @@ def update_account_profile() -> tuple[Any, int]:
             log_security_event(account_id, "account_profile_update", "success")
 
         updated_profile = fetch_account_profile_by_id(conn, account_id)
+        badges = build_badges_for_account(conn, account_id, include_preview=BADGE_PREVIEW_ENABLED)
 
-    return jsonify({"ok": True, "message": "Account details updated.", "profile": serialize_account_profile(updated_profile)}), 200
+    return jsonify({"ok": True, "message": "Account details updated.", "profile": serialize_account_profile(updated_profile), "badges": badges}), 200
 
 
 @app.post("/api/account/discord")
@@ -3079,7 +3742,7 @@ def member_signals() -> tuple[Any, int]:
         
         # Get FREE signals (available to all logged-in users)
         free_signals = conn.execute(
-            "SELECT id, signal_day, tier_number, asset_symbol, market, direction, entry_price, target_price, stop_price, confidence_label, session_label, thesis, base_currency_code, status FROM daily_signals WHERE signal_day = ? AND is_free = 1 AND status IN ('open', 'published') ORDER BY tier_number ASC",
+            "SELECT id, signal_day, tier_number, asset_symbol, market, direction, entry_price, target_price, stop_price, confidence_label, session_label, thesis, signal_time_utc, timer_minutes, base_currency_code, status FROM daily_signals WHERE signal_day = ? AND is_free = 1 AND status IN ('open', 'published') ORDER BY tier_number ASC",
             (today,),
         ).fetchall()
         
@@ -3087,7 +3750,7 @@ def member_signals() -> tuple[Any, int]:
         paid_signal_rows = []
         if max_signals > 0:
             paid_signal_rows = conn.execute(
-                "SELECT id, signal_day, tier_number, asset_symbol, market, direction, entry_price, target_price, stop_price, confidence_label, session_label, thesis, base_currency_code, status FROM daily_signals WHERE signal_day = ? AND tier_number <= ? AND is_free = 0 AND status IN ('open', 'published') ORDER BY tier_number ASC",
+                "SELECT id, signal_day, tier_number, asset_symbol, market, direction, entry_price, target_price, stop_price, confidence_label, session_label, thesis, signal_time_utc, timer_minutes, base_currency_code, status FROM daily_signals WHERE signal_day = ? AND tier_number <= ? AND is_free = 0 AND status IN ('open', 'published') ORDER BY tier_number ASC",
                 (today, max_signals),
             ).fetchall()
 
@@ -3277,6 +3940,7 @@ def member_dashboard() -> tuple[Any, int]:
     account_id = int(g.current_account["id"])
     with get_db() as conn:
         loyalty = conn.execute("SELECT * FROM customer_loyalty WHERE account_id = ?", (account_id,)).fetchone()
+        badges = build_badges_for_account(conn, account_id, include_preview=BADGE_PREVIEW_ENABLED)
         purchases = conn.execute(
             "SELECT id, tier_name, expires_at, created_at FROM purchases WHERE account_id = ? ORDER BY created_at DESC LIMIT 5",
             (account_id,)
@@ -3289,16 +3953,6 @@ def member_dashboard() -> tuple[Any, int]:
     # Calculate loyalty level and badges
     months_active = loyalty["months_active"] if loyalty else 0
     total_spent = loyalty["total_spent_gbp"] if loyalty else 0
-    
-    badges = []
-    if months_active >= LOYALTY_MEMBER_BADGE_MONTHS:
-        badges.append({"name": "Member", "icon": "👤", "achievement": "Joined VaultSignalsAI"})
-    if months_active >= LOYALTY_TRUSTED_BADGE_MONTHS:
-        badges.append({"name": "Loyal Customer (6mo)", "icon": "⭐", "achievement": "6+ months with us", "bonus": "+1 week/purchase"})
-    if months_active >= LOYALTY_VETERAN_BADGE_MONTHS:
-        badges.append({"name": "VIP Member (1yr)", "icon": "👑", "achievement": "1+ year member"})
-    if total_spent >= LOYALTY_SUPPORTER_SPEND_GBP:
-        badges.append({"name": "Signal Enthusiast", "icon": "🎯", "achievement": f"£{total_spent:.2f} invested"})
     
     loyalty_level = "bronze"
     if months_active >= LOYALTY_LEVEL_DIAMOND_MONTHS:
@@ -3347,48 +4001,30 @@ def community_summary() -> tuple[Any, int]:
         return jsonify({"ok": False, "message": "Login required."}), 401
 
     account_id = int(g.current_account["id"])
-    now = utc_now()
-    today = now.strftime("%Y-%m-%d")
-    week_start = (now - timedelta(days=7)).strftime("%Y-%m-%d")
-    month_start = (now - timedelta(days=30)).strftime("%Y-%m-%d")
 
     with get_db() as conn:
         ensure_community_profile(conn, account_id, str(g.current_account["username"] or "member"))
         profile = conn.execute(
-            "SELECT display_name, avatar_url, bio, privacy_mode, layout_preset, show_on_leaderboard, user_rank, ignore_whisper, email_alerts, market_alerts, renewal_reminders, preferred_billing_method FROM community_profiles WHERE account_id = ?",
+            "SELECT display_name, display_name_changed_at, avatar_url, bio, privacy_mode, layout_preset, show_on_leaderboard, user_rank, ignore_whisper, email_alerts, market_alerts, renewal_reminders, preferred_billing_method FROM community_profiles WHERE account_id = ?",
             (account_id,),
         ).fetchone()
         balances = conn.execute(
             "SELECT balance_amount, total_invested, total_profit, updated_at FROM account_balances WHERE account_id = ?",
             (account_id,),
         ).fetchone()
-
-        daily = conn.execute(
-            "SELECT COALESCE(SUM(invested_amount),0) AS invested, COALESCE(SUM(profit_amount),0) AS profit FROM account_performance_snapshots WHERE account_id = ? AND period_day = ?",
-            (account_id, today),
-        ).fetchone()
-        weekly = conn.execute(
-            "SELECT COALESCE(SUM(invested_amount),0) AS invested, COALESCE(SUM(profit_amount),0) AS profit FROM account_performance_snapshots WHERE account_id = ? AND period_day >= ?",
-            (account_id, week_start),
-        ).fetchone()
-        monthly = conn.execute(
-            "SELECT COALESCE(SUM(invested_amount),0) AS invested, COALESCE(SUM(profit_amount),0) AS profit FROM account_performance_snapshots WHERE account_id = ? AND period_day >= ?",
-            (account_id, month_start),
-        ).fetchone()
-        lifetime = conn.execute(
-            "SELECT COALESCE(SUM(invested_amount),0) AS invested, COALESCE(SUM(profit_amount),0) AS profit FROM account_performance_snapshots WHERE account_id = ?",
-            (account_id,),
-        ).fetchone()
-
+        performance = get_account_performance_summary(conn, account_id)
         top_tier = get_active_tier_number(conn, account_id)
-        badges = build_badges_for_account(conn, account_id)
+        badges = build_badges_for_account(conn, account_id, include_preview=BADGE_PREVIEW_ENABLED)
+        connection_counts = get_connection_counts(conn, account_id)
+        display_name_policy = build_display_name_policy(profile)
+        loyalty = get_loyalty_snapshot(conn, account_id)
 
     return jsonify(
         {
             "ok": True,
             "account": {
                 "username": g.current_account["username"],
-                "displayName": profile["display_name"] if profile else g.current_account["username"],
+                "displayName": profile["display_name"] if profile and profile["display_name"] else g.current_account["username"],
                 "avatarUrl": profile["avatar_url"] if profile and profile["avatar_url"] else COMMUNITY_DEFAULT_AVATAR,
                 "bio": profile["bio"] if profile else "",
                 "privacyMode": profile["privacy_mode"] if profile else "public",
@@ -3401,6 +4037,11 @@ def community_summary() -> tuple[Any, int]:
                 "renewalReminders": bool(profile["renewal_reminders"]) if profile else True,
                 "preferredBillingMethod": profile["preferred_billing_method"] if profile else "paypal",
                 "tierBadge": f"Tier {top_tier}" if top_tier > 0 else "No Tier",
+                "displayNameCanChange": display_name_policy["canChange"],
+                "displayNameChangeAvailableAt": display_name_policy["availableAt"],
+                "displayNameCooldownDays": display_name_policy["cooldownDays"],
+                "connectionCounts": connection_counts,
+                "loyaltyLevel": loyalty["loyaltyLevel"],
             },
             "balance": {
                 "current": float((balances["balance_amount"] if balances else COMMUNITY_DEFAULT_BALANCE) or 0),
@@ -3408,12 +4049,7 @@ def community_summary() -> tuple[Any, int]:
                 "totalProfit": float((balances["total_profit"] if balances else 0) or 0),
                 "updatedAt": balances["updated_at"] if balances else None,
             },
-            "summary": {
-                "daily": {"invested": float(daily["invested"] or 0), "profit": float(daily["profit"] or 0)},
-                "weekly": {"invested": float(weekly["invested"] or 0), "profit": float(weekly["profit"] or 0)},
-                "monthly": {"invested": float(monthly["invested"] or 0), "profit": float(monthly["profit"] or 0)},
-                "lifetime": {"invested": float(lifetime["invested"] or 0), "profit": float(lifetime["profit"] or 0)},
-            },
+            "summary": performance,
             "badges": badges,
         }
     ), 200
@@ -3460,18 +4096,36 @@ def community_settings_update() -> tuple[Any, int]:
 
         ensure_community_profile(conn, account_id, str(g.current_account["username"] or "member"))
         existing_profile = conn.execute(
-            "SELECT avatar_url FROM community_profiles WHERE account_id = ?",
+            "SELECT display_name, display_name_changed_at, avatar_url FROM community_profiles WHERE account_id = ?",
             (account_id,),
         ).fetchone()
+        current_display_name = existing_profile["display_name"] if existing_profile and existing_profile["display_name"] else g.current_account["username"]
+        next_display_name = current_display_name
+        next_display_name_changed_at = existing_profile["display_name_changed_at"] if existing_profile else None
+        if "displayName" in payload:
+            requested_display_name = display_name or g.current_account["username"]
+            if requested_display_name != current_display_name:
+                display_name_policy = build_display_name_policy(existing_profile)
+                if not display_name_policy["canChange"]:
+                    next_change = display_name_policy["availableAt"] or "later"
+                    return jsonify(
+                        {
+                            "ok": False,
+                            "message": f"Display name can be changed once every {DISPLAY_NAME_CHANGE_COOLDOWN_DAYS} days. Next change available after {next_change}.",
+                        }
+                    ), 429
+                next_display_name = requested_display_name
+                next_display_name_changed_at = utc_now().strftime("%Y-%m-%d %H:%M:%S")
         next_avatar_url = avatar_url if avatar_url is not None else (existing_profile["avatar_url"] if existing_profile and existing_profile["avatar_url"] else COMMUNITY_DEFAULT_AVATAR)
         conn.execute(
             """
             UPDATE community_profiles
-            SET display_name = ?, avatar_url = ?, bio = ?, privacy_mode = ?, layout_preset = ?, show_on_leaderboard = ?, user_rank = ?, ignore_whisper = ?, email_alerts = ?, market_alerts = ?, renewal_reminders = ?, preferred_billing_method = ?, updated_at = CURRENT_TIMESTAMP
+            SET display_name = ?, display_name_changed_at = ?, avatar_url = ?, bio = ?, privacy_mode = ?, layout_preset = ?, show_on_leaderboard = ?, user_rank = ?, ignore_whisper = ?, email_alerts = ?, market_alerts = ?, renewal_reminders = ?, preferred_billing_method = ?, updated_at = CURRENT_TIMESTAMP
             WHERE account_id = ?
             """,
             (
-                display_name or g.current_account["username"],
+                next_display_name,
+                next_display_name_changed_at,
                 next_avatar_url,
                 bio,
                 privacy_mode,
@@ -3564,43 +4218,95 @@ def community_open_account(username: str) -> tuple[Any, int]:
             return jsonify({"ok": False, "message": "Account not found."}), 404
 
         target_id = int(target["id"])
-        profile = conn.execute(
-            "SELECT display_name, avatar_url, bio, privacy_mode, show_on_leaderboard, user_rank FROM community_profiles WHERE account_id = ?",
-            (target_id,),
-        ).fetchone()
-        balances = conn.execute(
-            "SELECT balance_amount, total_invested, total_profit FROM account_balances WHERE account_id = ?",
-            (target_id,),
-        ).fetchone()
+        viewer_id = int(g.current_account["id"]) if g.current_account is not None else None
+        viewer_is_admin = g.current_account is not None and is_admin_account(g.current_account)
+        snapshot = get_community_member_snapshot(conn, target_id, viewer_id, viewer_is_admin)
+        if snapshot is None:
+            return jsonify({"ok": False, "message": "Account not found."}), 404
 
-        is_owner = g.current_account is not None and int(g.current_account["id"]) == target_id
-        is_admin = g.current_account is not None and is_admin_username(g.current_account["username"])
-        is_private = profile is not None and profile["privacy_mode"] == "private"
+    return jsonify({"ok": True, **snapshot}), 200
 
-        response_payload: dict[str, Any] = {
-            "ok": True,
-            "profile": {
-                "username": target["username"],
-                "displayName": profile["display_name"] if profile and profile["display_name"] else target["username"],
-                "avatarUrl": profile["avatar_url"] if profile and profile["avatar_url"] else COMMUNITY_DEFAULT_AVATAR,
-                "bio": profile["bio"] if profile else "",
-                "privacyMode": profile["privacy_mode"] if profile else "public",
-                "userRank": profile["user_rank"] if profile else "",
-            },
-            "badges": build_badges_for_account(conn, target_id),
-        }
 
-        if not is_private or is_owner or is_admin:
-            response_payload["balance"] = {
-                "current": float((balances["balance_amount"] if balances else COMMUNITY_DEFAULT_BALANCE) or 0),
-                "invested": float((balances["total_invested"] if balances else 0) or 0),
-                "profit": float((balances["total_profit"] if balances else 0) or 0),
+@app.get("/api/community/network")
+def community_network_list() -> tuple[Any, int]:
+    if g.current_account is None:
+        return jsonify({"ok": False, "message": "Login required."}), 401
+
+    account_id = int(g.current_account["id"])
+    viewer_is_admin = is_admin_account(g.current_account)
+    with get_db() as conn:
+        ensure_community_profile(conn, account_id, str(g.current_account["username"] or "member"))
+        latest_previews = get_last_whisper_previews(conn, account_id)
+        connection_rows = conn.execute(
+            "SELECT target_account_id, created_at FROM community_network WHERE account_id = ? ORDER BY created_at DESC",
+            (account_id,),
+        ).fetchall()
+        incoming_rows = conn.execute(
+            "SELECT requester_account_id, created_at FROM community_connection_requests WHERE recipient_account_id = ? AND status = 'pending' ORDER BY created_at DESC",
+            (account_id,),
+        ).fetchall()
+        outgoing_rows = conn.execute(
+            "SELECT recipient_account_id, created_at FROM community_connection_requests WHERE requester_account_id = ? AND status = 'pending' ORDER BY created_at DESC",
+            (account_id,),
+        ).fetchall()
+        counts = get_connection_counts(conn, account_id)
+
+        def build_card(target_id: int, created_at: str | None, time_key: str) -> dict[str, Any] | None:
+            snapshot = get_community_member_snapshot(conn, int(target_id), account_id, viewer_is_admin)
+            if snapshot is None:
+                return None
+            profile = snapshot["profile"]
+            performance = snapshot.get("performance") or {}
+            balance = snapshot.get("balance") or {}
+            latest_message = latest_previews.get(int(target_id))
+            card: dict[str, Any] = {
+                "username": profile["username"],
+                "displayName": profile["displayName"],
+                "avatarUrl": profile["avatarUrl"],
+                "bio": profile["bio"],
+                "tierBadge": profile["tierBadge"],
+                "userRank": profile["userRank"],
+                "connectionsCount": profile["connectionsCount"],
+                "networkState": snapshot["networkState"],
+                "canWhisper": snapshot["canWhisper"],
+                "visibility": snapshot["visibility"],
+                "badges": snapshot["badges"][:4],
+                "balance": balance.get("current"),
+                "weeklyProfit": (performance.get("weekly") or {}).get("profit") if performance else None,
+                "lifetimeProfit": (performance.get("lifetime") or {}).get("profit") if performance else None,
+                "lastMessage": latest_message,
             }
-            response_payload["visibility"] = "public"
-        else:
-            response_payload["visibility"] = "private"
+            if created_at:
+                card[time_key] = created_at
+            return card
 
-    return jsonify(response_payload), 200
+        connections: list[dict[str, Any]] = []
+        for row in connection_rows:
+            card = build_card(int(row["target_account_id"] or 0), row["created_at"], "connectedAt")
+            if card is not None:
+                connections.append(card)
+
+        incoming_requests: list[dict[str, Any]] = []
+        for row in incoming_rows:
+            card = build_card(int(row["requester_account_id"] or 0), row["created_at"], "requestedAt")
+            if card is not None:
+                incoming_requests.append(card)
+
+        outgoing_requests: list[dict[str, Any]] = []
+        for row in outgoing_rows:
+            card = build_card(int(row["recipient_account_id"] or 0), row["created_at"], "requestedAt")
+            if card is not None:
+                outgoing_requests.append(card)
+
+    return jsonify(
+        {
+            "ok": True,
+            "counts": counts,
+            "connections": connections,
+            "incomingRequests": incoming_requests,
+            "outgoingRequests": outgoing_requests,
+        }
+    ), 200
 
 
 @app.post("/api/community/network/add")
@@ -3623,15 +4329,128 @@ def community_network_add() -> tuple[Any, int]:
         if target_id == account_id:
             return jsonify({"ok": False, "message": "You cannot add yourself to your network."}), 400
 
+        if are_accounts_connected(conn, account_id, target_id):
+            return jsonify({"ok": True, "message": "Already connected.", "state": "connected"}), 200
+
+        reverse_request = conn.execute(
+            "SELECT id FROM community_connection_requests WHERE requester_account_id = ? AND recipient_account_id = ? AND status = 'pending'",
+            (target_id, account_id),
+        ).fetchone()
+        if reverse_request is not None:
+            accept_connection_request(conn, target_id, account_id)
+            return jsonify({"ok": True, "message": "Connection accepted. You can message each other now.", "state": "connected"}), 200
+
+        existing_request = conn.execute(
+            "SELECT status FROM community_connection_requests WHERE requester_account_id = ? AND recipient_account_id = ?",
+            (account_id, target_id),
+        ).fetchone()
+        if existing_request is not None and str(existing_request["status"] or "").lower() == "pending":
+            return jsonify({"ok": True, "message": "Connection request already sent.", "state": "outgoing"}), 200
+
         conn.execute(
-            "INSERT OR IGNORE INTO community_network (account_id, target_account_id) VALUES (?, ?)",
+            """
+            INSERT INTO community_connection_requests (requester_account_id, recipient_account_id, status, created_at, responded_at)
+            VALUES (?, ?, 'pending', CURRENT_TIMESTAMP, NULL)
+            ON CONFLICT(requester_account_id, recipient_account_id) DO UPDATE SET
+              status = 'pending',
+              created_at = CURRENT_TIMESTAMP,
+              responded_at = NULL
+            """,
             (account_id, target_id),
         )
-        created = conn.execute("SELECT changes() AS changed").fetchone()
 
-    if created and int(created["changed"] or 0) == 0:
-        return jsonify({"ok": True, "message": "Already in your network."}), 200
-    return jsonify({"ok": True, "message": "Added to your network."}), 201
+    return jsonify({"ok": True, "message": "Connection request sent.", "state": "outgoing"}), 201
+
+
+@app.post("/api/community/network/respond")
+def community_network_respond() -> tuple[Any, int]:
+    if g.current_account is None:
+        return jsonify({"ok": False, "message": "Login required."}), 401
+
+    payload = request.get_json(silent=True) or {}
+    target_username = str(payload.get("targetUsername", "")).strip().lower()
+    action = str(payload.get("action", "accept")).strip().lower()
+    if not target_username:
+        return jsonify({"ok": False, "message": "Target username is required."}), 400
+    if action not in {"accept", "decline"}:
+        return jsonify({"ok": False, "message": "Invalid action."}), 400
+
+    account_id = int(g.current_account["id"])
+    with get_db() as conn:
+        requester = conn.execute("SELECT id FROM accounts WHERE lower(username) = ?", (target_username,)).fetchone()
+        if requester is None:
+            return jsonify({"ok": False, "message": "User not found."}), 404
+
+        requester_id = int(requester["id"])
+        request_row = conn.execute(
+            "SELECT id FROM community_connection_requests WHERE requester_account_id = ? AND recipient_account_id = ? AND status = 'pending'",
+            (requester_id, account_id),
+        ).fetchone()
+        if request_row is None:
+            return jsonify({"ok": False, "message": "No pending request from this user."}), 404
+
+        if action == "accept":
+            accept_connection_request(conn, requester_id, account_id)
+            return jsonify({"ok": True, "message": "Connection accepted.", "state": "connected"}), 200
+
+        conn.execute(
+            "UPDATE community_connection_requests SET status = 'declined', responded_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (int(request_row["id"]),),
+        )
+
+    return jsonify({"ok": True, "message": "Connection request declined.", "state": "none"}), 200
+
+
+@app.get("/api/community/chat/inbox")
+def community_chat_inbox() -> tuple[Any, int]:
+    if g.current_account is None:
+        return jsonify({"ok": False, "message": "Login required."}), 401
+
+    account_id = int(g.current_account["id"])
+    viewer_is_admin = is_admin_account(g.current_account)
+    with get_db() as conn:
+        previews = get_last_whisper_previews(conn, account_id)
+        connection_ids = [
+            int(row["target_account_id"] or 0)
+            for row in conn.execute(
+                "SELECT target_account_id FROM community_network WHERE account_id = ? ORDER BY created_at DESC",
+                (account_id,),
+            ).fetchall()
+        ]
+
+        ordered_ids: list[int] = []
+        seen_ids: set[int] = set()
+        for target_id in list(previews.keys()) + connection_ids:
+            if target_id <= 0 or target_id in seen_ids:
+                continue
+            seen_ids.add(target_id)
+            ordered_ids.append(target_id)
+
+        threads: list[dict[str, Any]] = []
+        for target_id in ordered_ids:
+            snapshot = get_community_member_snapshot(conn, target_id, account_id, viewer_is_admin)
+            if snapshot is None:
+                continue
+            profile = snapshot["profile"]
+            latest = previews.get(target_id) or {}
+            threads.append(
+                {
+                    "username": profile["username"],
+                    "displayName": profile["displayName"],
+                    "avatarUrl": profile["avatarUrl"],
+                    "userRank": profile["userRank"],
+                    "tierBadge": profile["tierBadge"],
+                    "networkState": snapshot["networkState"],
+                    "canWhisper": snapshot["canWhisper"],
+                    "badges": snapshot["badges"][:3],
+                    "lastMessagePreview": latest.get("text"),
+                    "lastMessageAt": latest.get("createdAt"),
+                    "lastMessageIsMine": bool(latest.get("isMine")),
+                }
+            )
+
+    threads.sort(key=lambda item: parse_db_timestamp(item.get("lastMessageAt")) or datetime.min, reverse=True)
+    return jsonify({"ok": True, "threads": threads}), 200
 
 
 @app.get("/api/community/posts")
@@ -3703,6 +4522,7 @@ def community_chat_global_list() -> tuple[Any, int]:
     if g.current_account is None:
         return jsonify({"ok": False, "message": "Login required."}), 401
 
+    requester_id = int(g.current_account["id"])
     with get_db() as conn:
         rows = conn.execute(
             """
@@ -3735,6 +4555,7 @@ def community_chat_global_list() -> tuple[Any, int]:
                     "id": row["id"],
                     "text": row["message_body"],
                     "createdAt": row["created_at"],
+                    "isMine": row["username"] == g.current_account["username"] and int(requester_id) > 0,
                     "username": row["username"],
                     "displayName": row["display_name"] or row["username"],
                     "avatarUrl": row["avatar_url"] or COMMUNITY_DEFAULT_AVATAR,
@@ -3789,7 +4610,13 @@ def community_chat_whisper_list(username: str) -> tuple[Any, int]:
         rows = conn.execute(
             """
             SELECT m.id, m.message_body, m.created_at, m.sender_account_id,
-                     a.username, cp.display_name, cp.avatar_url, cp.user_rank
+                                         a.username, cp.display_name, cp.avatar_url, cp.user_rank,
+                                         COALESCE((
+                                                 SELECT MAX(COALESCE(p.tier_number, 0))
+                                                 FROM purchases p
+                                                 WHERE p.account_id = a.id
+                                                     AND (p.expires_at IS NULL OR p.expires_at > CURRENT_TIMESTAMP)
+                                         ), 0) AS sender_tier
             FROM chat_messages m
             JOIN accounts a ON a.id = m.sender_account_id
             LEFT JOIN community_profiles cp ON cp.account_id = a.id
@@ -3817,6 +4644,7 @@ def community_chat_whisper_list(username: str) -> tuple[Any, int]:
                     "displayName": row["display_name"] or row["username"],
                     "avatarUrl": row["avatar_url"] or COMMUNITY_DEFAULT_AVATAR,
                     "userRank": row["user_rank"] or "",
+                    "tierBadge": f"Tier {int(row['sender_tier'])}" if int(row["sender_tier"] or 0) > 0 else "No Tier",
                 }
                 for row in ordered
             ],
@@ -3848,11 +4676,13 @@ def community_chat_whisper_send(username: str) -> tuple[Any, int]:
             return jsonify({"ok": False, "message": "Target account not found."}), 404
 
         target_id = int(target["id"])
+        if target_id == requester_id:
+            return jsonify({"ok": False, "message": "Choose another member for a private chat."}), 400
         target_profile = conn.execute(
             "SELECT ignore_whisper FROM community_profiles WHERE account_id = ?",
             (target_id,),
         ).fetchone()
-        if target_profile is not None and int(target_profile["ignore_whisper"] or 0) == 1:
+        if target_profile is not None and int(target_profile["ignore_whisper"] or 0) == 1 and not are_accounts_connected(conn, requester_id, target_id):
             return jsonify({"ok": False, "message": "This user is not accepting whispers right now."}), 403
 
         conn.execute(

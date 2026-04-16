@@ -1,0 +1,19 @@
+<section class="section performance-timeline" id="performanceTimelineSection">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">Transparent Results</p>
+      <h2>Performance Timeline Snapshot</h2>
+      <p class="section-copy">A month-by-month performance view with clear context on conditions and risk posture.</p>
+    </div>
+  </div>
+
+  <div class="timeline-shell">
+    {% for item in performance_timeline %}
+    <article class="timeline-item {{ item.status_class }}">
+      <p class="timeline-month">{{ item.month }}</p>
+      <strong class="timeline-value">{{ item.value }}</strong>
+      <p class="timeline-note">{{ item.note }}</p>
+    </article>
+    {% endfor %}
+  </div>
+</section>

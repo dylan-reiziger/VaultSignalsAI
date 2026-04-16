@@ -115,8 +115,25 @@
     {% include 'feedback_modal.html' %}
 
     <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <script src="{{ url_for('static', filename='badges.js') }}"></script>
     <script src="{{ url_for('static', filename='community.js') }}"></script>
     <script>
+      function escapeHtml(value) {
+        return String(value ?? '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+
+      function renderBadgeCard(badge) {
+        if (window.VaultBadgeUI?.renderShieldBadge) {
+          return window.VaultBadgeUI.renderShieldBadge(badge, { variant: 'grid' });
+        }
+        return `<span>${escapeHtml(badge.label || badge.name || 'Badge')}</span>`;
+      }
+
       // Load dashboard data
       async function loadDashboard() {
         try {
@@ -166,14 +183,7 @@
         document.getElementById('loyaltyStats').innerHTML = loyaltyStatsHtml;
         
         // Render badges
-        const badgesHtml = loyalty.badges.map(badge => `
-          <div class="badge-card">
-            <div class="badge-icon">${badge.icon}</div>
-            <h4>${badge.name}</h4>
-            <p>${badge.achievement}</p>
-            ${badge.bonus ? `<span class="bonus-tag">${badge.bonus}</span>` : ''}
-          </div>
-        `).join('');
+        const badgesHtml = (loyalty.badges || []).map(renderBadgeCard).join('');
         document.getElementById('badgesContainer').innerHTML = badgesHtml || '<p>No badges yet. Keep trading!</p>';
         
         // Render recent purchases

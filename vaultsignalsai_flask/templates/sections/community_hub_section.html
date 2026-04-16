@@ -2,11 +2,12 @@
   <div class="section-heading">
     <div>
       <p class="eyebrow">Community Hub</p>
-      <h2>Your account, global chat, whispers, and leaderboard</h2>
-      <p class="section-copy">Chat requires an active paid tier. Privacy mode hides your balance and removes you from leaderboards.</p>
+      <h2>A live floor for chat, rankings, connections, and private conversations</h2>
+      <p class="section-copy">Use the public floor for live chat, open any member profile to inspect stats, build accepted connections for reliable private messaging, and manage your visibility from one place.</p>
     </div>
   </div>
-  <div class="community-hub-grid">
+
+  <div class="community-hub-grid community-hub-grid--advanced">
     <article class="community-account-panel">
       <div class="community-account-header">
         <div class="community-account-avatar-container">
@@ -21,7 +22,7 @@
             <span id="communityTierBadge" class="community-tier-badge">No Tier</span>
           </div>
           <p id="communityRankBadge" class="community-rank-badge">Rank: -</p>
-          <p class="community-account-subtitle">Shape your profile, control your privacy, and tune your community presence.</p>
+          <p class="community-account-subtitle">Your public identity, loyalty signal, connection count, and visibility controls all sit here while the live floor stays open on the right.</p>
         </div>
       </div>
 
@@ -43,14 +44,54 @@
         </div>
       </div>
 
+      <div class="community-pulse-grid">
+        <div class="community-pulse-card">
+          <span class="community-pulse-label">Connections</span>
+          <strong id="communityConnectionsCount">0</strong>
+          <p>Accepted members</p>
+        </div>
+        <div class="community-pulse-card">
+          <span class="community-pulse-label">Incoming</span>
+          <strong id="communityIncomingCount">0</strong>
+          <p>Requests waiting</p>
+        </div>
+        <div class="community-pulse-card">
+          <span class="community-pulse-label">Outgoing</span>
+          <strong id="communityOutgoingCount">0</strong>
+          <p>Sent invitations</p>
+        </div>
+        <div class="community-pulse-card">
+          <span class="community-pulse-label">Loyalty</span>
+          <strong id="communityLoyaltyLevel">Bronze</strong>
+          <p id="communityPrivacyState">Public profile</p>
+        </div>
+      </div>
+
+      <div class="community-account-note-card">
+        <div class="community-account-note-head">
+          <p class="settings-group-title">Profile Notes</p>
+          <a class="ghost-btn community-identity-link" href="/settings#settings-privacy-section">Manage name and privacy</a>
+        </div>
+        <p id="communityBio" class="community-bio-copy">Open your profile, add a short description, and let people know how you trade.</p>
+        <div id="communityBadgeStrip" class="community-badge-strip"></div>
+        <p id="communityRenameNote" class="community-privacy-note">Display name changes live in Settings and can only be changed once every 30 days.</p>
+      </div>
+
       <div class="account-settings-section">
-        <h4>Account Settings</h4>
+        <h4>Community Controls</h4>
         <form id="communitySettingsForm" class="community-settings-form">
           <div class="settings-group">
-            <p class="settings-group-title">Profile</p>
+            <p class="settings-group-title">Presence</p>
             <label>
-              <span>Display Name</span>
-              <input id="communityDisplayNameInput" type="text" maxlength="50" placeholder="How your name appears in chat" />
+              <span>Bio</span>
+              <textarea id="communityBioInput" maxlength="400" rows="4" placeholder="Short intro shown on your member profile."></textarea>
+            </label>
+            <label class="privacy-section-label">
+              <span>Privacy Mode</span>
+              <select id="communityPrivacyMode">
+                <option value="public">Public - Everyone sees your profile</option>
+                <option value="private">Private - Hide balance and remove from leaderboards</option>
+              </select>
             </label>
           </div>
 
@@ -66,21 +107,10 @@
                 <span class="community-checkbox-ui" aria-hidden="true"></span>
               </span>
             </label>
-            <label class="privacy-section-label">
-              <span>Privacy Mode</span>
-              <select id="communityPrivacyMode">
-                <option value="public">Public - Everyone sees your profile</option>
-                <option value="private">Private - Hide balance & remove from leaderboards</option>
-              </select>
-            </label>
-          </div>
-
-          <div class="settings-group">
-            <p class="settings-group-title">Whisper Settings</p>
             <label class="community-checkbox-row">
               <span class="community-checkbox-copy">
-                <strong>Ignore whisper messages</strong>
-                <span>Keep the community hub read-only by muting private chats from other members.</span>
+                <strong>Filter unsolicited whispers</strong>
+                <span>Members in your accepted connections can still message you, but new unsolicited whispers get blocked.</span>
               </span>
               <span class="community-checkbox-control">
                 <input id="communityIgnoreWhisper" type="checkbox" />
@@ -89,27 +119,59 @@
             </label>
           </div>
 
-          <button type="submit" class="primary-btn">Save Settings</button>
+          <button type="submit" class="primary-btn">Save Community Controls</button>
         </form>
-        <div id="communitySettingsMessage" class="billing-message" aria-live="polite">Update your community profile and privacy.</div>
+        <div id="communitySettingsMessage" class="billing-message" aria-live="polite">Update your community bio, privacy, and messaging controls.</div>
       </div>
     </article>
 
-    <article class="community-chat-panel">
-      <div class="community-tabs-header">
-        <button id="chatTabGlobal" class="tab-btn active" data-community-view="global" type="button">Global Chat</button>
-        <button id="chatTabWhisper" class="tab-btn" data-community-view="whisper" type="button">Whisper</button>
-        <button id="chatTabLeaderboard" class="tab-btn" data-community-view="leaderboard" type="button">Leaderboard</button>
+    <article class="community-chat-panel community-chat-panel--advanced">
+      <div class="community-workspace-head">
+        <div>
+          <p class="eyebrow">Live Floor</p>
+          <h3>Talk publicly, inspect members, and move serious conversations into direct threads</h3>
+        </div>
+        <div class="community-workspace-pills">
+          <span class="community-pill">Global resets on restart</span>
+          <span class="community-pill">Accepted connections can always DM</span>
+        </div>
       </div>
 
-      <div id="chatContent" class="tab-content active">
-        <div id="communityChatMeta" class="community-chat-meta">Tier required to send messages.</div>
-        <div id="communityChatList" class="community-chat-list"></div>
-        <form id="communityChatForm" class="community-chat-form">
-          <input id="communityWhisperTarget" class="hidden" type="text" placeholder="Whisper username" spellcheck="false" />
-          <input id="communityChatInput" type="text" maxlength="600" placeholder="Type your message..." />
+      <div class="community-tabs-header community-tabs-header--four">
+        <button id="chatTabGlobal" class="tab-btn active" data-community-view="global" type="button">Global Chat</button>
+        <button id="chatTabWhisper" class="tab-btn" data-community-view="whisper" type="button">Direct Inbox</button>
+        <button id="chatTabLeaderboard" class="tab-btn" data-community-view="leaderboard" type="button">Leaderboard</button>
+        <button id="chatTabNetwork" class="tab-btn" data-community-view="network" type="button">Network</button>
+      </div>
+
+      <div id="globalContent" class="tab-content active">
+        <div id="communityChatMeta" class="community-chat-meta">Tier required to send messages. The global room is intentionally temporary and clears when the server restarts.</div>
+        <div id="communityGlobalList" class="community-chat-list community-chat-list--global"></div>
+        <form id="communityGlobalForm" class="community-chat-form">
+          <input id="communityGlobalInput" type="text" maxlength="600" placeholder="Type a message to the public floor..." />
           <button type="submit" class="primary-btn">Send</button>
         </form>
+      </div>
+
+      <div id="whisperContent" class="tab-content">
+        <div class="community-direct-layout">
+          <aside class="community-thread-sidebar">
+            <div class="community-thread-sidebar-head">
+              <p class="settings-group-title">Inbox</p>
+              <input id="communityWhisperTarget" type="text" placeholder="Open a thread by username" spellcheck="false" />
+            </div>
+            <div id="communityThreadList" class="community-thread-list"></div>
+          </aside>
+
+          <div class="community-thread-panel">
+            <div id="communityWhisperMeta" class="community-chat-meta">Choose a connection, click a member from chat, or enter a username to open a whisper thread.</div>
+            <div id="communityWhisperList" class="community-chat-list"></div>
+            <form id="communityWhisperForm" class="community-chat-form">
+              <input id="communityWhisperInput" type="text" maxlength="600" placeholder="Type a private message..." />
+              <button type="submit" class="primary-btn">Send</button>
+            </form>
+          </div>
+        </div>
       </div>
 
       <div id="leaderboardContent" class="tab-content">
@@ -126,29 +188,70 @@
           <button id="leaderboardNext" class="leaderboard-nav-btn" type="button" aria-label="Next page">&#8250;</button>
         </div>
       </div>
+
+      <div id="networkContent" class="tab-content">
+        <div class="community-network-layout">
+          <section class="community-network-section">
+            <div class="community-network-head">
+              <div>
+                <p class="settings-group-title">Connections</p>
+                <h4>Accepted members</h4>
+              </div>
+              <p>These members can always move into private chat with you.</p>
+            </div>
+            <div id="communityConnectionsGrid" class="community-network-grid"></div>
+          </section>
+
+          <section class="community-network-section">
+            <div class="community-network-head">
+              <div>
+                <p class="settings-group-title">Incoming</p>
+                <h4>Requests waiting on you</h4>
+              </div>
+              <p>Accept or decline new connection requests.</p>
+            </div>
+            <div id="communityIncomingRequests" class="community-network-grid"></div>
+          </section>
+
+          <section class="community-network-section">
+            <div class="community-network-head">
+              <div>
+                <p class="settings-group-title">Outgoing</p>
+                <h4>Requests you already sent</h4>
+              </div>
+              <p>Pending invitations stay here until the other member responds.</p>
+            </div>
+            <div id="communityOutgoingRequests" class="community-network-grid"></div>
+          </section>
+        </div>
+      </div>
     </article>
   </div>
 
   <div id="userProfileModal" class="user-profile-modal hidden">
-    <div class="user-profile-modal-content">
+    <div class="user-profile-modal-content user-profile-modal-content--wide">
       <button class="modal-close-btn" type="button">✕</button>
       <div class="user-profile-header">
         <img id="userProfileAvatar" class="user-profile-avatar" src="/static/vaultsignals-logo.png" alt="User avatar" />
         <div class="user-profile-info">
           <h4 id="userProfileName">User</h4>
+          <p id="userProfileHandle" class="user-profile-handle">@member</p>
           <p id="userProfileRank" class="user-profile-rank">Rank: -</p>
           <p id="userProfileTier" class="user-profile-tier">Tier: -</p>
         </div>
       </div>
-      <div class="user-profile-actions">
+      <p id="userProfileBio" class="user-profile-bio">No bio set.</p>
+      <div id="userProfileStats" class="user-profile-stats"></div>
+      <div id="userProfileBadges" class="user-profile-badge-strip"></div>
+      <div class="user-profile-actions user-profile-actions--three">
         <button id="addToNetworkBtn" class="action-btn network-btn" type="button">
-          <span>+</span> Add to Network
+          <span>+</span> Connection
         </button>
         <button id="userCheckAccountBtn" class="action-btn account-btn" type="button">
-          <span>View</span> Check Account
+          <span>View</span> Open Account
         </button>
         <button id="userWhisperBtn" class="action-btn whisper-btn" type="button">
-          <span>Msg</span> Whisper
+          <span>Msg</span> Private Chat
         </button>
       </div>
       <div id="userProfileMessage" class="user-profile-message"></div>

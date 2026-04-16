@@ -21,6 +21,8 @@ function getAdminSignalPayload() {
     stopPrice: Number(document.getElementById('adminStop')?.value || 0),
     confidenceLabel: document.getElementById('adminConfidence')?.value.trim(),
     sessionLabel: document.getElementById('adminSession')?.value.trim(),
+    signalTimeUtc: document.getElementById('adminSignalTime')?.value || '',
+    timerMinutes: Number(document.getElementById('adminTimerMinutes')?.value || 90),
     thesis: document.getElementById('adminThesis')?.value.trim(),
   };
 }
@@ -45,6 +47,8 @@ function resetAdminFormForCreate() {
     const dayNode = document.getElementById('adminSignalDay');
     if (dayNode) dayNode.value = dayValue;
   }
+  const timerNode = document.getElementById('adminTimerMinutes');
+  if (timerNode) timerNode.value = '90';
   setEditingMode(null);
 }
 
@@ -66,6 +70,8 @@ function beginEditSignal(signalId) {
   document.getElementById('adminStop').value = signal.stopPrice;
   document.getElementById('adminConfidence').value = signal.confidenceLabel;
   document.getElementById('adminSession').value = signal.sessionLabel;
+  document.getElementById('adminSignalTime').value = signal.signalTimeUtc || '';
+  document.getElementById('adminTimerMinutes').value = String(signal.timerMinutes || 90);
   document.getElementById('adminThesis').value = signal.thesis;
 
   setEditingMode(signal.id);
@@ -104,7 +110,7 @@ function renderAdminSignalsTable(signals) {
     <table>
       <thead>
         <tr>
-          <th>ID</th><th>Tier</th><th>Asset</th><th>Dir</th><th>Entry</th><th>Target</th><th>Stop</th><th>Status</th><th>Actions</th>
+          <th>ID</th><th>Tier</th><th>Asset</th><th>Dir</th><th>Time UTC</th><th>Timer</th><th>Entry</th><th>Target</th><th>Stop</th><th>Status</th><th>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -114,6 +120,8 @@ function renderAdminSignalsTable(signals) {
             <td>${signal.tierNumber}</td>
             <td>${signal.assetSymbol}</td>
             <td>${signal.direction}</td>
+            <td>${signal.signalTimeUtc || '--:--'}</td>
+            <td>${signal.timerMinutes || 90}m</td>
             <td>${signal.entryPrice}</td>
             <td>${signal.targetPrice}</td>
             <td>${signal.stopPrice}</td>

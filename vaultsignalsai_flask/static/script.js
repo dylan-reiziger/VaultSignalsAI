@@ -69,6 +69,8 @@ let authModal;
 let authModalClose;
 let rememberLoginGroup;
 let rememberLogin;
+let dataConsentGroup;
+let dataConsent;
 let authUnverifiedActions;
 let resendVerificationBtn;
 let changeUnverifiedEmailBtn;
@@ -130,6 +132,7 @@ let signalsSummary;
 let signalsFeed;
 let signalsEmpty;
 let purchaseTiers;
+let signalAiScanner;
 let signalsMarketSelect;
 let openMarketBtn;
 let alertToastStack;
@@ -141,6 +144,7 @@ const MAX_MARKET_HISTORY_POINTS = 32;
 let liveDeskRefreshHandle;
 let liveDeskEventSource;
 let liveDeskStreamKey = '';
+let signalCountdownHandle;
 
 // ── CONFIG CONSTANTS ──────────────────────────────────────────────
 const VAT_RATE = Number(document.body?.dataset.vatRate || '0.21');
@@ -269,6 +273,7 @@ function populateMarketFeed(data) {
 
   recordMarketSnapshot(data.crypto || []);
   detectSignalAlerts(data.crypto || []);
+  renderSignalAiScanner();
 }
 
 function getBitvavoMarketUrl(symbol = 'btc') {
@@ -740,7 +745,11 @@ function setAuthMode(mode) {
   zipcodeGroup?.classList.toggle('hidden', !isSignup);
   discordTagGroup?.classList.toggle('hidden', !isSignup);
   discordLevelGroup?.classList.toggle('hidden', !isSignup);
-  rememberLoginGroup?.classList.toggle('hidden', isSignup);
+  rememberLoginGroup?.classList.toggle('hidden', false);
+  dataConsentGroup?.classList.toggle('hidden', !isSignup);
+  if (!isSignup && dataConsent) {
+    dataConsent.checked = false;
+  }
   setUnverifiedActionsVisible(false);
   if (submitBtn) {
     submitBtn.textContent = isSignup ? 'Create Member Account' : 'Log Into Account';
@@ -748,7 +757,7 @@ function setAuthMode(mode) {
   if (!isSignup) {
     setMessage('Enter your email and password to log in.');
   } else {
-    setMessage('Enter details to create a new account. Discord tag level is assigned only after system verification.');
+    setMessage('Enter your details to create an account. Consent to data storage is required, and paid signals unlock only after you buy a tier.');
   }
 }
 
@@ -1029,18 +1038,249 @@ function getSignalRiskRewardLabel(signal) {
   return `${formatNumber(reward / risk, 2)}R`;
 }
 
+function setSignalsWelcome(primaryText, secondaryText = '') {
+  if (!signalsWelcome) return;
+
+  if (!secondaryText) {
+    signalsWelcome.textContent = primaryText;
+    return;
+  }
+
+  signalsWelcome.innerHTML = `
+    <span class="signals-welcome-primary">${escapeHtml(primaryText)}</span>
+    <span class="signals-welcome-secondary">${escapeHtml(secondaryText)}</span>
+  `;
+}
+
+function formatDuration(ms) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (days > 0) {
+    return `${days}d ${String(hours).padStart(2, '0')}h ${String(minutes).padStart(2, '0')}m`;
+  }
+
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function getSignalCountdownState(signal) {
+  const startsAt = Date.parse(signal.signalStartsAtUtc || '');
+  const endsAt = Date.parse(signal.signalEndsAtUtc || '');
+  const now = Date.now();
+
+  if (!Number.isFinite(startsAt) || !Number.isFinite(endsAt)) {
+    return { label: 'Timing window', value: 'Pending', status: 'pending' };
+  }
+
+  if (now < startsAt) {
+    return { label: 'Starts in', value: formatDuration(startsAt - now), status: 'pending' };
+  }
+
+  if (now <= endsAt) {
+    return { label: 'Window closes in', value: formatDuration(endsAt - now), status: 'live' };
+  }
+
+  return { label: 'Signal window', value: 'Closed', status: 'closed' };
+}
+
+function refreshSignalCountdowns() {
+  document.querySelectorAll('[data-signal-countdown]').forEach((node) => {
+    const signal = {
+      signalStartsAtUtc: node.dataset.signalStart || '',
+      signalEndsAtUtc: node.dataset.signalEnd || '',
+    };
+    const countdown = getSignalCountdownState(signal);
+    const labelNode = node.querySelector('[data-signal-countdown-label]');
+    const valueNode = node.querySelector('[data-signal-countdown-value]');
+    if (labelNode) {
+      labelNode.textContent = countdown.label;
+    }
+    if (valueNode) {
+      valueNode.textContent = countdown.value;
+    }
+    node.dataset.timerState = countdown.status;
+  });
+}
+
+function ensureSignalCountdownTimer() {
+  if (signalCountdownHandle) {
+    window.clearInterval(signalCountdownHandle);
+    signalCountdownHandle = null;
+  }
+
+  if (!document.querySelector('[data-signal-countdown]')) {
+    return;
+  }
+
+  refreshSignalCountdowns();
+  signalCountdownHandle = window.setInterval(refreshSignalCountdowns, 1000);
+}
+
+function buildSignalAiScannerSummary() {
+  const summary = state.cryptoData.summary || {};
+  const cryptoItems = getLiveCryptoItems();
+  if (!cryptoItems.length) {
+    return null;
+  }
+
+  const totalAssets = Number(summary.tracked_assets || cryptoItems.length || 0);
+  const positiveCount = Number(summary.positive_count || cryptoItems.filter((item) => Number(item.change ?? item.change_24h ?? 0) >= 0).length);
+  const breadthRatio = totalAssets ? (positiveCount / totalAssets) : 0;
+  const changes = cryptoItems.map((item) => Number(item.change ?? item.change_24h ?? 0)).filter((value) => Number.isFinite(value));
+  const avgChange = changes.length ? changes.reduce((sum, value) => sum + value, 0) / changes.length : 0;
+  const avgAbsChange = changes.length ? changes.reduce((sum, value) => sum + Math.abs(value), 0) / changes.length : 0;
+  const leader = [...cryptoItems].sort((left, right) => Math.abs(Number(right.change ?? right.change_24h ?? 0)) - Math.abs(Number(left.change ?? left.change_24h ?? 0)))[0] || null;
+
+  const shortWindowMoves = cryptoItems.map((item) => {
+    const historyKey = item.symbol || item.id;
+    const points = marketHistory.get(historyKey) || [];
+    if (points.length < 6) {
+      return null;
+    }
+    const start = Number(points[0]);
+    const end = Number(points[points.length - 1]);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start === 0) {
+      return null;
+    }
+    return ((end - start) / start) * 100;
+  }).filter((value) => Number.isFinite(value));
+  const avgShortMove = shortWindowMoves.length ? shortWindowMoves.reduce((sum, value) => sum + value, 0) / shortWindowMoves.length : (avgChange / 6);
+
+  let biasLabel = 'Mixed market watch';
+  if (breadthRatio >= 0.65 && (avgChange > 0 || avgShortMove > 0)) {
+    biasLabel = 'Bullish continuation watch';
+  } else if (breadthRatio <= 0.35 && (avgChange < 0 || avgShortMove < 0)) {
+    biasLabel = 'Bearish continuation watch';
+  }
+
+  const slopeLabel = avgShortMove >= 0.25
+    ? 'Rising short-window slopes'
+    : (avgShortMove <= -0.25 ? 'Falling short-window slopes' : 'Balanced short-window slopes');
+  const volatilityLabel = avgAbsChange >= 4
+    ? 'Volatility expansion'
+    : (avgAbsChange >= 2 ? 'Active volatility' : 'Compressed volatility');
+  const timingWindow = avgAbsChange >= 4
+    ? '15-30 minute expansion window'
+    : (Math.abs(avgShortMove) >= 0.35 ? '30-60 minute directional window' : '45-90 minute confirmation window');
+  const updatedAt = Number(summary.updated_at || 0);
+  const updatedLabel = updatedAt
+    ? new Date(updatedAt * 1000).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+    : 'Waiting';
+
+  return {
+    biasLabel,
+    slopeLabel,
+    volatilityLabel,
+    timingWindow,
+    breadthLabel: `${positiveCount}/${totalAssets} tracked assets positive`,
+    leaderName: leader ? `${leader.symbol || leader.id} ${formatSignedPercent(Number(leader.change ?? leader.change_24h ?? 0))}` : 'Waiting for leader',
+    avgShortMove,
+    updatedLabel,
+  };
+}
+
+function renderSignalAiScanner() {
+  if (!signalAiScanner) {
+    return;
+  }
+
+  const scanner = buildSignalAiScannerSummary();
+  if (!scanner) {
+    signalAiScanner.innerHTML = `
+      <article class="panel-card signal-ai-card signal-ai-card--lead">
+        <span class="signal-ai-kicker">Live engine</span>
+        <h3>Waiting for market feed</h3>
+        <p>The AI scanner will populate once live crypto breadth and momentum data are loaded.</p>
+      </article>
+    `;
+    return;
+  }
+
+  signalAiScanner.innerHTML = `
+    <article class="panel-card signal-ai-card signal-ai-card--lead">
+      <span class="signal-ai-kicker">Probability engine</span>
+      <h3>${escapeHtml(scanner.biasLabel)}</h3>
+      <p>The AI watches breadth, slope changes, volatility expansion, and leadership rotation across tracked crypto markets to score likely move windows before confirmation.</p>
+      <div class="signal-ai-disclaimer">This is a probability model, not a guarantee. It reads live pressure and timing windows rather than promising the next candle with certainty.</div>
+      <span class="signal-ai-updated">Updated ${escapeHtml(scanner.updatedLabel)}</span>
+    </article>
+    <article class="panel-card signal-ai-card">
+      <span class="signal-ai-metric-label">Breadth</span>
+      <strong>${escapeHtml(scanner.breadthLabel)}</strong>
+      <p>Cross-market participation tells the AI whether moves are broad or isolated.</p>
+    </article>
+    <article class="panel-card signal-ai-card">
+      <span class="signal-ai-metric-label">Slope read</span>
+      <strong>${escapeHtml(scanner.slopeLabel)}</strong>
+      <p>Short-window line changes are scored for rising or fading pressure across tracked majors.</p>
+    </article>
+    <article class="panel-card signal-ai-card">
+      <span class="signal-ai-metric-label">Timing window</span>
+      <strong>${escapeHtml(scanner.timingWindow)}</strong>
+      <p>${escapeHtml(scanner.volatilityLabel)} with an average micro-move of ${formatSignedPercent(scanner.avgShortMove)}.</p>
+    </article>
+    <article class="panel-card signal-ai-card signal-ai-card--leader">
+      <span class="signal-ai-metric-label">Momentum leader</span>
+      <strong>${escapeHtml(scanner.leaderName)}</strong>
+      <p>The AI uses relative leadership to judge whether momentum is rotating or concentrating.</p>
+    </article>
+  `;
+}
+
 function renderSignalsPage(payload) {
   if (!signalsFeed || !signalsSummary || !signalsWelcome || !signalsEmpty) return;
 
   if (!payload || !payload.member) {
-    signalsWelcome.textContent = 'Log in to see the signals and tiers attached to your account.';
-    signalsSummary.innerHTML = '';
+    ensureSignalCountdownTimer();
+    signalsWelcome.textContent = 'Log in to open your signal board and review the tiers attached to your account.';
+    signalsSummary.innerHTML = `
+      <article class="panel-card signal-summary-card signal-summary-card--focus">
+        <span class="signal-summary-label">Signal access</span>
+        <div class="signal-summary-value">0<small>signals/day</small></div>
+        <p class="signal-summary-copy">Sign in to load your paid tiers, active setups, and member-only market routes.</p>
+        <div class="signal-summary-pills">
+          <span class="signal-summary-pill signal-summary-pill--muted">Member login required</span>
+        </div>
+      </article>
+      <article class="panel-card signal-summary-card">
+        <span class="signal-summary-label">Board format</span>
+        <div class="signal-summary-value">5<small>signal fields</small></div>
+        <p class="signal-summary-copy">Every live setup is presented with entry, target, stop, thesis, and route in a single card.</p>
+        <div class="signal-summary-pills">
+          <span class="signal-summary-pill">Entry</span>
+          <span class="signal-summary-pill">Target</span>
+          <span class="signal-summary-pill">Stop</span>
+        </div>
+      </article>
+      <article class="panel-card signal-summary-card signal-summary-card--route">
+        <span class="signal-summary-label">Upgrade path</span>
+        <div class="signal-summary-value">Live<small>tier options</small></div>
+        <p class="signal-summary-copy">Upgrade cards remain available below so you can compare tiers before logging in.</p>
+        <div class="signal-summary-pills">
+          <span class="signal-summary-pill signal-summary-pill--soft">Preview available</span>
+        </div>
+      </article>
+    `;
     signalsFeed.innerHTML = '';
+    const emptyTitle = signalsEmpty.querySelector('h3');
+    const emptyCopy = signalsEmpty.querySelector('p');
+    if (emptyTitle) {
+      emptyTitle.textContent = 'Log in to unlock your member board';
+    }
+    if (emptyCopy) {
+      emptyCopy.textContent = 'Your active signals will appear here once you sign in. Upgrade tiers remain available below.';
+    }
     signalsEmpty.classList.remove('hidden');
     return;
   }
 
-  signalsWelcome.textContent = `Welcome back, ${payload.member.fullName || payload.member.username}. Here is your curated signal board for today.`;
+  setSignalsWelcome(
+    `Welcome back, ${payload.member.fullName || payload.member.username}.`,
+    'Here is your curated signal board for today.'
+  );
   const portfolio = payload.portfolio || { purchases: [], signalsPerDay: 0, activeTiers: 0 };
   const activeSignals = Array.isArray(payload.signals) ? payload.signals : [];
   const purchasePills = Array.isArray(portfolio.purchases) && portfolio.purchases.length
@@ -1088,6 +1328,7 @@ function renderSignalsPage(payload) {
   if (!activeSignals.length) {
     signalsFeed.innerHTML = '';
     signalsEmpty.classList.remove('hidden');
+    ensureSignalCountdownTimer();
     return;
   }
 
@@ -1096,15 +1337,20 @@ function renderSignalsPage(payload) {
     const assetSymbol = escapeHtml(String(signal.assetSymbol || 'Asset').toUpperCase());
     const direction = escapeHtml(signal.direction || 'Long');
     const directionClass = String(signal.direction || 'long').toLowerCase() === 'short' ? 'is-short' : 'is-long';
+    const cardToneClass = directionClass === 'is-short' ? 'member-signal-card--short' : 'member-signal-card--long';
     const sessionLabel = escapeHtml(signal.sessionLabel || 'All-day session');
     const marketLabel = escapeHtml(signal.market || `${assetSymbol}/USD`);
     const confidenceLabel = escapeHtml(signal.confidenceLabel || 'Structured');
     const thesis = escapeHtml(signal.thesis || 'No execution note provided.');
     const statusLabel = escapeHtml(signal.status || 'published');
     const riskRewardLabel = getSignalRiskRewardLabel(signal);
+    const countdown = getSignalCountdownState(signal);
+    const startsAtLabel = signal.signalStartsAtUtc
+      ? new Date(signal.signalStartsAtUtc).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC'
+      : `${escapeHtml(signal.signalTimeUtc || '--:--')} UTC`;
 
     return `
-      <article class="panel-card member-signal-card">
+      <article class="panel-card member-signal-card ${cardToneClass}">
         <div class="member-signal-topline">
           <span class="signal-tier-pill">Tier ${signal.tierNumber}</span>
           <span class="signal-session-pill">${sessionLabel}</span>
@@ -1117,15 +1363,25 @@ function renderSignalsPage(payload) {
           </div>
           <span class="signal-confidence">${confidenceLabel}</span>
         </div>
+        <div class="member-signal-timing">
+          <article class="member-signal-timebox">
+            <span>Signal time</span>
+            <strong>${startsAtLabel}</strong>
+          </article>
+          <article class="member-signal-timebox member-signal-timebox--countdown" data-signal-countdown data-signal-start="${escapeHtml(signal.signalStartsAtUtc || '')}" data-signal-end="${escapeHtml(signal.signalEndsAtUtc || '')}" data-timer-state="${escapeHtml(countdown.status)}">
+            <span data-signal-countdown-label>${escapeHtml(countdown.label)}</span>
+            <strong data-signal-countdown-value>${escapeHtml(countdown.value)}</strong>
+          </article>
+        </div>
         <div class="member-signal-prices">
-          <div><span>Entry</span><strong>${formatCurrencyAmount(signal.entryPrice)}</strong></div>
-          <div><span>Target</span><strong>${formatCurrencyAmount(signal.targetPrice)}</strong></div>
-          <div><span>Stop</span><strong>${formatCurrencyAmount(signal.stopPrice)}</strong></div>
+          <article class="member-signal-price member-signal-price--entry"><span>Entry</span><strong>${formatCurrencyAmount(signal.entryPrice)}</strong></article>
+          <article class="member-signal-price member-signal-price--target"><span>Target</span><strong>${formatCurrencyAmount(signal.targetPrice)}</strong></article>
+          <article class="member-signal-price member-signal-price--stop"><span>Stop</span><strong>${formatCurrencyAmount(signal.stopPrice)}</strong></article>
         </div>
         <div class="member-signal-meta">
-          <span class="signal-stat-pill">R:R ${riskRewardLabel}</span>
-          <span class="signal-stat-pill">${statusLabel}</span>
-          <span class="signal-stat-pill">Bitvavo route</span>
+          <span class="signal-stat-pill signal-stat-pill--rr">R:R ${riskRewardLabel}</span>
+          <span class="signal-stat-pill signal-stat-pill--status">${statusLabel}</span>
+          <span class="signal-stat-pill signal-stat-pill--route">Direct route</span>
         </div>
         <div class="member-signal-thesis">
           <span>Execution note</span>
@@ -1133,13 +1389,44 @@ function renderSignalsPage(payload) {
         </div>
         <div class="member-signal-actions">
           <a class="bitvavo-btn member-market-btn" href="${getBitvavoMarketUrl(signal.assetSymbol)}" target="_blank" rel="noreferrer">
-            <span>Open ${assetSymbol} on Bitvavo</span>
+            <span class="member-market-btn-label">Open ${assetSymbol} on Bitvavo</span>
             <span class="member-market-btn-meta">${sessionLabel}</span>
           </a>
         </div>
       </article>
     `;
   }).join('');
+  ensureSignalCountdownTimer();
+}
+
+function getTierPresentation(tierNumber, signalsPerDay) {
+  const presentations = {
+    1: {
+      badge: 'Focused',
+      headline: 'Built for members who want a cleaner single setup each day.',
+      note: 'A restrained daily flow with enough context to keep decision quality high.',
+      toneClass: 'signal-tier-card--starter',
+    },
+    2: {
+      badge: 'Balanced',
+      headline: 'A steadier signal rhythm for members who want broader session coverage.',
+      note: 'Balanced flow across the day without turning the board into noise.',
+      toneClass: 'signal-tier-card--balanced',
+    },
+    3: {
+      badge: 'Priority',
+      headline: 'Higher coverage for active traders who want more opportunity flow.',
+      note: 'Best fit for members who review the board repeatedly through the session.',
+      toneClass: 'signal-tier-card--priority',
+    },
+  };
+
+  return presentations[tierNumber] || {
+    badge: signalsPerDay >= 5 ? 'Priority' : 'Focused',
+    headline: 'Structured access designed for disciplined signal consumption.',
+    note: 'Use the tier that matches the pace you can execute consistently.',
+    toneClass: 'signal-tier-card--starter',
+  };
 }
 
 async function loadMemberSignals() {
@@ -1153,9 +1440,10 @@ async function loadMemberSignals() {
     }
     state.signals = result.signals || [];
     renderSignalsPage(result);
-    await loadPurchaseTiers();
   } catch (error) {
     renderSignalsPage(null);
+  } finally {
+    await loadPurchaseTiers();
   }
 }
 
@@ -1185,30 +1473,40 @@ function renderPurchaseTiers(payload) {
   }
 
   purchaseTiers.innerHTML = tiers.map((tier) => {
+    const presentation = getTierPresentation(Number(tier.tierNumber || 0), Number(tier.signalsPerDay || 0));
     const tierName = escapeHtml(tier.tierName);
     const description = escapeHtml(tier.description || 'Unlock a stronger signal flow for this member account.');
     const signalsPerDay = Number(tier.signalsPerDay || 0);
     const displayPrice = Number(tier.displayPrice || 0);
     const priceLabel = `${escapeHtml(payload.currency.symbol)}${displayPrice.toFixed(2)}`;
+    const tierFeatures = [
+      `${signalsPerDay} daily signal${signalsPerDay === 1 ? '' : 's'}`,
+      signalsPerDay >= 5 ? 'Highest board coverage' : (signalsPerDay >= 3 ? 'Balanced session flow' : 'Focused starter flow'),
+      'Member dashboard access',
+      'Direct market route',
+    ];
     return `
-      <article class="panel-card signal-tier-card">
+      <article class="panel-card signal-tier-card ${presentation.toneClass}">
+        <div class="tier-band">
+          <span class="tier-kicker">Tier ${tier.tierNumber}</span>
+          <span class="tier-status-pill">${presentation.badge}</span>
+        </div>
         <div class="tier-head">
           <div>
-            <span class="tier-kicker">Tier ${tier.tierNumber}</span>
             <h3>${tierName}</h3>
+            <p class="tier-headline">${presentation.headline}</p>
           </div>
           <span class="tier-density-pill">${signalsPerDay}/day</span>
         </div>
         <p class="tier-description">${description}</p>
         <div class="tier-feature-list">
-          <span class="tier-feature-pill">${signalsPerDay} daily signal${signalsPerDay === 1 ? '' : 's'}</span>
-          <span class="tier-feature-pill">Member dashboard access</span>
-          <span class="tier-feature-pill">Direct market route</span>
+          ${tierFeatures.map((feature) => `<span class="tier-feature-pill">${escapeHtml(feature)}</span>`).join('')}
         </div>
         <div class="tier-pricing">
           <strong class="price">${priceLabel}</strong>
           <span class="billing-cycle">per month</span>
         </div>
+        <p class="tier-card-note">${presentation.note}</p>
         <button class="primary-btn buy-tier-btn" data-tier-number="${tier.tierNumber}" type="button">
           Unlock ${tierName}
         </button>
@@ -1225,6 +1523,12 @@ function renderPurchaseTiers(payload) {
 async function handleBuyTier(tiers, tierNumber) {
   const tier = tiers.find(t => t.tierNumber === tierNumber);
   if (!tier) return;
+
+  if (!state.member) {
+    setMessage('Log in to unlock a signal tier from the board.');
+    openAuthModal('login');
+    return;
+  }
   
   try {
     const response = await fetch('/api/member/purchases', {
@@ -1312,10 +1616,11 @@ function updateMemberStatus() {
   if (!memberStatus) return;
 
   if (state.member) {
+    const roleLabel = state.member.isAdmin ? 'Admin account' : 'Member account';
     const verificationText = state.member.discordVerificationStatus === 'verified'
       ? `Discord level: ${state.member.discordTag || 'verified'}`
       : 'Discord level pending system verification';
-    memberStatus.textContent = `Member verified: ${state.member.email} · ${verificationText}`;
+    memberStatus.textContent = `${roleLabel}: ${state.member.email} · ${verificationText}`;
     memberStatus.classList.add('active');
     memberStatus.classList.remove('hidden');
   } else {
@@ -1375,14 +1680,21 @@ async function handleAuthSubmit(event) {
 
   let payload = { email, password };
   if (state.authMode === 'signup') {
+    const consentToDataStorage = Boolean(formData.get('dataConsent'));
+    if (!consentToDataStorage) {
+      setMessage('You must consent to Vault Signals storing your submitted account data before creating an account.');
+      return;
+    }
     payload = {
       username: formData.get('username')?.trim() || '',
       fullName: formData.get('fullName')?.trim() || '',
       email,
       password,
+      rememberMe,
       zipcode: formData.get('zipcode')?.trim() || '',
       address: formData.get('address')?.trim() || '',
       discordUsername: formData.get('discordUsername')?.trim() || '',
+      consentToDataStorage,
     };
   } else {
     payload = { email, password, rememberMe };
@@ -1416,20 +1728,8 @@ async function handleAuthSubmit(event) {
         if (emailInput) emailInput.value = email;
         return;
       }
-      if (state.authMode === 'login' && response.status === 403 && (result.message || '').toLowerCase().includes('not verified')) {
-        setUnverifiedActionsVisible(true);
-      } else {
-        setUnverifiedActionsVisible(false);
-      }
-      setMessage(result.message || `Request failed (${response.status}).`);
-      return;
-    }
-
-    if (state.authMode === 'signup') {
-      setMessage('Account created. You can now log in immediately.', true);
       setUnverifiedActionsVisible(false);
-      setAuthMode('login');
-      authForm.reset();
+      setMessage(result.message || `Request failed (${response.status}).`);
       return;
     }
 
@@ -1786,6 +2086,8 @@ function setupPage() {
   submitBtn = document.getElementById('submitBtn');
   rememberLoginGroup = document.getElementById('rememberLoginGroup');
   rememberLogin = document.getElementById('rememberLogin');
+  dataConsentGroup = document.getElementById('dataConsentGroup');
+  dataConsent = document.getElementById('dataConsent');
   usernameGroup = document.getElementById('usernameGroup');
   fullNameGroup = document.getElementById('fullNameGroup');
   addressGroup = document.getElementById('addressGroup');
@@ -1888,6 +2190,7 @@ function setupPage() {
   signalsFeed = document.getElementById('signalsFeed');
   signalsEmpty = document.getElementById('signalsEmpty');
   purchaseTiers = document.getElementById('purchaseTiers');
+  signalAiScanner = document.getElementById('signalAiScanner');
   canvas = document.getElementById('marketCanvas');
   if (canvas) {
     ctx = canvas.getContext('2d');

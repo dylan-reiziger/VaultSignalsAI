@@ -92,15 +92,15 @@
                 <div class="settings-card-head">
                   <p class="settings-card-kicker">Community</p>
                   <h3>Community profile</h3>
-                  <p class="settings-card-copy">Keep your community identity clean here. Avatar management has been moved to your personal account page.</p>
+                  <p class="settings-card-copy">Keep your community bio and public introduction clean here. Display-name changes now live in the privacy section below and no longer happen from inside the community hub.</p>
                 </div>
                 <a href="/account/profile" class="ghost-btn settings-inline-link">Open personal details</a>
               </div>
               <div class="settings-section-grid">
-                <label>
-                  <span>Display Name</span>
-                  <input id="settingsDisplayName" type="text" maxlength="50" placeholder="Your display name" />
-                </label>
+                <div class="settings-inline-note">
+                  <strong>Community identity</strong>
+                  <p>Your live hub now uses this page for display-name and privacy decisions, while the hub itself stays focused on chat, connections, and member activity.</p>
+                </div>
                 <div class="settings-inline-note">
                   <strong>Avatar control</strong>
                   <p>The profile image now lives on the dedicated account page so this settings view stays focused on platform preferences.</p>
@@ -116,9 +116,17 @@
               <div class="settings-card-head">
                 <p class="settings-card-kicker">Privacy</p>
                 <h3>Visibility and messaging</h3>
-                <p class="settings-card-copy">Choose who can see your profile and how open your inbox should be inside the community.</p>
+                <p class="settings-card-copy">Choose who can see your profile, how open your inbox should be, and when you want to refresh the name people see around the community.</p>
               </div>
               <div class="settings-section-grid settings-section-grid--privacy">
+                <label>
+                  <span>Display Name</span>
+                  <input id="settingsDisplayName" type="text" maxlength="50" placeholder="Your display name" />
+                </label>
+                <div id="settingsDisplayNameMeta" class="settings-inline-note">
+                  <strong>Display name policy</strong>
+                  <p>Change your display name from this settings page only. The community hub no longer edits it directly.</p>
+                </div>
                 <label>
                   <span>Privacy Mode</span>
                   <select id="settingsPrivacyMode">
@@ -276,6 +284,13 @@
           }
         }
 
+        function formatAvailability(raw) {
+          if (!raw) return 'later';
+          const normalized = String(raw).includes('T') ? String(raw) : String(raw).replace(' ', 'T');
+          const parsed = new Date(`${normalized}Z`);
+          return Number.isNaN(parsed.getTime()) ? raw : parsed.toLocaleString();
+        }
+
         function fillCurrencyOptions(catalog, selectedCode) {
           const currencySelect = document.getElementById('settingsCurrencyCode');
           if (!currencySelect || !Array.isArray(catalog)) return;
@@ -317,8 +332,10 @@
           const td = document.getElementById('settingsTierDisplay');
           const rd = document.getElementById('settingsRankDisplay');
           const avatar = document.getElementById('settingsAvatarPreview');
+          const dnMeta = document.getElementById('settingsDisplayNameMeta');
 
           if (dn) dn.value = acc.displayName || '';
+          if (dn) dn.disabled = acc.displayNameCanChange === false;
           if (bio) bio.value = acc.bio || '';
           if (lb) lb.checked = Boolean(acc.showOnLeaderboard);
           if (pm) pm.value = acc.privacyMode || 'public';
@@ -331,6 +348,12 @@
           if (td) td.textContent = acc.tierBadge || 'No Tier';
           if (rd) rd.textContent = acc.userRank || '-';
           if (avatar) avatar.src = acc.avatarUrl || "{{ url_for('static', filename='vaultsignals-logo.png') }}";
+          if (dnMeta) {
+            const cooldownDays = Number(acc.displayNameCooldownDays || 30);
+            dnMeta.innerHTML = acc.displayNameCanChange === false
+              ? `<strong>Display name locked</strong><p>Next change available ${formatAvailability(acc.displayNameChangeAvailableAt)}. Changes only happen from this settings page and are limited to one update every ${cooldownDays} days.</p>`
+              : `<strong>Display name policy</strong><p>Change your display name from this settings page only. The community hub no longer edits it directly, and changes are limited to one update every ${cooldownDays} days.</p>`;
+          }
 
           fillCurrencyOptions(sessionData.currencies || [], sessionData.currency?.code || 'GBP');
         }

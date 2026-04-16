@@ -52,9 +52,15 @@
         </select>
         <small id="discordVerificationHint" class="auth-discord-status">Tag level is assigned only after system checks your Discord membership.</small>
       </div>
+      <label id="dataConsentGroup" class="auth-consent-row hidden">
+        <input id="dataConsent" name="dataConsent" type="checkbox" value="1" />
+        <span>
+          I consent to Vault Signals storing and processing the account, contact, and service-use data I submit so my member account can be created and managed. By creating an account, I also agree to the <a href="/terms-and-conditions" target="_blank" rel="noreferrer">Terms &amp; Conditions</a>.
+        </span>
+      </label>
       <button class="submit-btn" type="submit" id="submitBtn">Create Member Account</button>
     </form>
     <p class="auth-discord-hint">Optional: connect Discord for possible discounts. <a href="https://discord.com/login" target="_blank" rel="noreferrer">Open Discord QR login</a></p>
-    <div id="authMessage" class="message-box">Create an account to unlock tier checkout.</div>
+    <div id="authMessage" class="message-box">Create an account to access your dashboard. Paid signals unlock after you buy a tier.</div>
   </div>
 </div>

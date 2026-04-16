@@ -13,7 +13,10 @@ CREATE TABLE IF NOT EXISTS accounts (
     address TEXT NOT NULL,
     discord_username TEXT,
     discord_tag TEXT,
-    verified INTEGER NOT NULL DEFAULT 0,
+    verified INTEGER NOT NULL DEFAULT 1,
+    is_admin INTEGER NOT NULL DEFAULT 0,
+    data_consent_accepted INTEGER NOT NULL DEFAULT 0,
+    data_consent_accepted_at TIMESTAMP,
     verification_token TEXT,
     verification_token_hash TEXT,
     verification_token_created_at TIMESTAMP,
@@ -67,6 +70,22 @@ CREATE TABLE IF NOT EXISTS account_discord_verifications (
     FOREIGN KEY (account_id) REFERENCES accounts(id)
 );
 
+CREATE TABLE IF NOT EXISTS account_custom_badges (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    code TEXT NOT NULL,
+    label TEXT NOT NULL,
+    short_label TEXT NOT NULL,
+    icon TEXT,
+    tone TEXT NOT NULL DEFAULT 'royal',
+    achievement TEXT,
+    badge_group TEXT NOT NULL DEFAULT 'custom',
+    display_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(account_id, code),
+    FOREIGN KEY (account_id) REFERENCES accounts(id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_accounts_email ON accounts(email);
 CREATE INDEX IF NOT EXISTS idx_accounts_token_hash ON accounts(verification_token_hash);
 CREATE INDEX IF NOT EXISTS idx_security_events_account_id ON account_security_events(account_id);
@@ -74,3 +93,4 @@ CREATE INDEX IF NOT EXISTS idx_auth_tokens_account_id ON auth_tokens(account_id)
 CREATE INDEX IF NOT EXISTS idx_auth_tokens_expires_at ON auth_tokens(expires_at);
 CREATE INDEX IF NOT EXISTS idx_discord_registry_username ON discord_member_registry(discord_username);
 CREATE INDEX IF NOT EXISTS idx_discord_verifications_account ON account_discord_verifications(account_id);
+CREATE INDEX IF NOT EXISTS idx_account_custom_badges_account ON account_custom_badges(account_id);

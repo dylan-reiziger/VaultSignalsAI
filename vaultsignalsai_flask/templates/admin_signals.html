@@ -74,6 +74,8 @@
                 <label>Stop<input id="adminStop" type="number" step="0.0001" required /></label>
                 <label>Confidence<input id="adminConfidence" type="text" placeholder="Core" required /></label>
                 <label>Session<input id="adminSession" type="text" placeholder="US Open" required /></label>
+                <label>Signal Time (UTC)<input id="adminSignalTime" type="time" /></label>
+                <label>Timer Minutes<input id="adminTimerMinutes" type="number" min="15" step="15" value="90" required /></label>
               </div>
               <label>Thesis<textarea id="adminThesis" rows="3" required></textarea></label>
               <div class="admin-actions-row">
@@ -93,6 +95,7 @@
           </article>
         </section>
         {% endif %}
+        {% include 'sections/copyright_bar.html' %}
       </main>
     </div>
 

@@ -9,7 +9,9 @@
     "stop_price": 80880,
     "confidence_label": "Core",
     "session_label": "London Open",
-    "thesis": "Momentum reclaimed the overnight range high with spot-led follow-through."
+    "thesis": "Momentum reclaimed the overnight range high with spot-led follow-through.",
+    "signal_time_utc": "07:15",
+    "timer_minutes": 90
   },
   {
     "tier_number": 2,
@@ -21,7 +23,9 @@
     "stop_price": 3988,
     "confidence_label": "Core+",
     "session_label": "Europe Midday",
-    "thesis": "ETH/BTC strength is holding while funding stays controlled, leaving room for continuation."
+    "thesis": "ETH/BTC strength is holding while funding stays controlled, leaving room for continuation.",
+    "signal_time_utc": "10:30",
+    "timer_minutes": 105
   },
   {
     "tier_number": 3,
@@ -33,7 +37,9 @@
     "stop_price": 183.5,
     "confidence_label": "Active",
     "session_label": "US Pre-Market",
-    "thesis": "Relative strength remains intact after a shallow pullback into prior demand."
+    "thesis": "Relative strength remains intact after a shallow pullback into prior demand.",
+    "signal_time_utc": "12:45",
+    "timer_minutes": 90
   },
   {
     "tier_number": 4,
@@ -45,7 +51,9 @@
     "stop_price": 0.701,
     "confidence_label": "Premium",
     "session_label": "US Open",
-    "thesis": "Failed breakout structure with declining spot volume favors a fade back into support."
+    "thesis": "Failed breakout structure with declining spot volume favors a fade back into support.",
+    "signal_time_utc": "14:30",
+    "timer_minutes": 120
   },
   {
     "tier_number": 5,
@@ -57,7 +65,9 @@
     "stop_price": 0.789,
     "confidence_label": "Pro",
     "session_label": "US Midday",
-    "thesis": "The daily trend remains constructive and intraday buyers defended the VWAP retest."
+    "thesis": "The daily trend remains constructive and intraday buyers defended the VWAP retest.",
+    "signal_time_utc": "17:00",
+    "timer_minutes": 105
   },
   {
     "tier_number": 6,
@@ -69,6 +79,8 @@
     "stop_price": 698,
     "confidence_label": "Elite",
     "session_label": "US Close",
-    "thesis": "Late-session compression above support creates a breakout continuation setup."
+    "thesis": "Late-session compression above support creates a breakout continuation setup.",
+    "signal_time_utc": "20:00",
+    "timer_minutes": 120
   }
 ]
