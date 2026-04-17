@@ -7,7 +7,8 @@
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='vaultsignals-logo.png') }}" />
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
   </head>
-  <body data-vat-rate="{{ ui_config.vat_rate }}" data-currency-symbol="{{ ui_config.currency_symbol }}" data-default-currency-code="{{ ui_config.default_currency_code }}">
+  <body data-page-loader="intro" data-vat-rate="{{ ui_config.vat_rate }}" data-currency-symbol="{{ ui_config.currency_symbol }}" data-default-currency-code="{{ ui_config.default_currency_code }}">
+    {% include 'sections/page_loader.html' %}
     <canvas id="marketCanvas"></canvas>
     <div class="site-shell">
       <div class="animated-bg">
@@ -125,6 +126,7 @@
     {% include 'auth_modal.html' %}
     {% include 'feedback_modal.html' %}
 
+    <script src="{{ url_for('static', filename='page_loader.js') }}"></script>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
   </body>
 </html>

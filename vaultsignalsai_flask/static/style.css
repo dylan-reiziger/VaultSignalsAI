@@ -71,6 +71,366 @@ a { color: inherit; text-decoration: none; }
 button, input { font: inherit; }
 button { cursor: pointer; }
 
+body[data-page-loader="intro"] .site-shell,
+body[data-page-loader="intro"] #marketCanvas {
+  transition: opacity .65s ease;
+}
+
+body.loader-active[data-page-loader="intro"] {
+  overflow: hidden;
+}
+
+body.loader-active[data-page-loader="intro"] .site-shell,
+body.loader-active[data-page-loader="intro"] #marketCanvas {
+  opacity: 0;
+}
+
+.app-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background:
+    radial-gradient(circle at 50% 18%, rgba(255, 240, 181, 0.18), transparent 24%),
+    radial-gradient(circle at 18% 80%, rgba(255, 255, 255, 0.08), transparent 28%),
+    radial-gradient(circle at 82% 24%, rgba(242, 193, 78, 0.14), transparent 26%),
+    linear-gradient(160deg, rgba(2, 3, 7, 0.99), rgba(6, 10, 22, 0.995));
+  overflow: hidden;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity .65s ease, visibility .65s ease;
+}
+
+body.loader-active[data-page-loader="intro"] .app-loader {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.app-loader::before,
+.app-loader::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.app-loader::before {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 68px 68px;
+  opacity: .12;
+  mask-image: radial-gradient(circle at center, rgba(0, 0, 0, 0.98) 28%, transparent 88%);
+}
+
+.app-loader::after {
+  inset: 12% 18%;
+  border-radius: 50%;
+  border: 1px solid rgba(242, 193, 78, 0.08);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.02),
+    0 0 120px rgba(242, 193, 78, 0.12);
+}
+
+.app-loader.is-complete {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.app-loader__content {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  justify-items: center;
+  gap: 0;
+  padding: 2.4rem;
+  isolation: isolate;
+}
+
+.app-loader__content::before {
+  content: "";
+  position: absolute;
+  inset: -16% -18%;
+  border-radius: 2rem;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(242, 193, 78, 0.14), transparent 40%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.012));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    inset 0 0 0 1px rgba(242, 193, 78, 0.05),
+    0 32px 100px rgba(0, 0, 0, 0.45);
+}
+
+.app-loader__content::after {
+  content: "";
+  position: absolute;
+  inset: 12% auto auto 50%;
+  width: 48%;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(242, 193, 78, 0.38), transparent);
+  opacity: .58;
+  transform: translateX(-50%);
+}
+
+.app-loader__coin {
+  position: relative;
+  width: min(20rem, 62vw);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  filter: drop-shadow(0 28px 72px rgba(0, 0, 0, 0.45));
+}
+
+.app-loader__coin::before {
+  content: "";
+  position: absolute;
+  inset: 22%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(242, 193, 78, 0.18), transparent 68%);
+  filter: blur(26px);
+  opacity: .85;
+}
+
+.app-loader__coin::after {
+  content: "";
+  position: absolute;
+  inset: 1.5%;
+  border-radius: 50%;
+  background: repeating-conic-gradient(
+    from 0deg,
+    rgba(255, 255, 255, 0.22) 0deg 1.8deg,
+    transparent 1.8deg 18deg
+  );
+  opacity: .16;
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 1px), #000 calc(100% - 1px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 1px), #000 calc(100% - 1px));
+}
+
+.app-loader__radar,
+.app-loader__orbit,
+.app-loader__locator {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.app-loader__radar--outer {
+  background: conic-gradient(
+    from 210deg,
+    transparent 0deg 52%,
+    rgba(242, 193, 78, 0.22) 66deg,
+    transparent 92deg 100%,
+    rgba(120, 184, 255, 0.18) 118deg,
+    transparent 142deg 360deg
+  );
+  opacity: .78;
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 10px), #000 calc(100% - 8px) calc(100% - 4px), transparent calc(100% - 2px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 10px), #000 calc(100% - 8px) calc(100% - 4px), transparent calc(100% - 2px));
+  animation: loaderSweep 6.2s linear infinite;
+}
+
+.app-loader__radar--inner {
+  inset: 13%;
+  background: conic-gradient(
+    from 28deg,
+    transparent 0deg 48%,
+    rgba(255, 255, 255, 0.16) 62deg,
+    transparent 84deg 100%,
+    rgba(242, 193, 78, 0.14) 136deg,
+    transparent 162deg 360deg
+  );
+  opacity: .52;
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 5px) calc(100% - 2px), transparent calc(100% - 1px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 5px) calc(100% - 2px), transparent calc(100% - 1px));
+  animation: loaderSweepReverse 8.4s linear infinite;
+}
+
+.app-loader__orbit {
+  inset: 8%;
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  opacity: .38;
+  animation: loaderOrbitSpin 12s linear infinite;
+}
+
+.app-loader__locator {
+  inset: 4%;
+  animation: loaderLocatorSpin 4.6s linear infinite;
+}
+
+.app-loader__locator::before {
+  content: "";
+  position: absolute;
+  top: 8%;
+  left: 50%;
+  width: .5rem;
+  height: .5rem;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff8df 0%, #f2c14e 60%, #a86b18 100%);
+  box-shadow:
+    0 0 0 8px rgba(242, 193, 78, 0.08),
+    0 0 18px rgba(242, 193, 78, 0.46);
+  transform: translateX(-50%);
+}
+
+.app-loader__progress {
+  position: absolute;
+  inset: 3.5%;
+  transform: rotate(-90deg);
+}
+
+.app-loader__progress-track,
+.app-loader__progress-fill {
+  fill: none;
+  stroke-width: 4;
+}
+
+.app-loader__progress-track {
+  stroke: rgba(255, 255, 255, 0.12);
+}
+
+.app-loader__progress-fill {
+  stroke: url(#appLoaderRingGradient);
+  stroke-linecap: round;
+  stroke-dasharray: 616;
+  stroke-dashoffset: 616;
+  filter: drop-shadow(0 0 9px rgba(242, 193, 78, 0.42));
+  animation: loaderRingFill 2.6s cubic-bezier(.2, .8, .2, 1) forwards;
+}
+
+.app-loader__logo-shell {
+  position: relative;
+  z-index: 1;
+  width: 67%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  padding: .95rem;
+  background:
+    radial-gradient(circle at 50% 22%, rgba(255, 255, 255, 0.08), transparent 30%),
+    radial-gradient(circle at 50% 50%, rgba(12, 15, 24, 0.92), rgba(1, 2, 6, 0.98));
+  border: 1px solid rgba(242, 193, 78, 0.2);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 18px 44px rgba(0, 0, 0, 0.42);
+  animation: loaderCoinFloat 2.8s ease-in-out infinite;
+}
+
+.app-loader__logo-shell::before {
+  content: "";
+  position: absolute;
+  inset: 7%;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.app-loader__logo {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+@keyframes loaderRingFill {
+  0% {
+    stroke-dashoffset: 616;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes loaderCoinFloat {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes loaderSweep {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes loaderSweepReverse {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(-360deg);
+  }
+}
+
+@keyframes loaderOrbitSpin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes loaderLocatorSpin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 980px) {
+  .app-loader {
+    padding: 1rem;
+  }
+
+  .app-loader__content {
+    padding: 1.9rem;
+  }
+
+  .app-loader__coin {
+    width: min(17rem, 78vw);
+  }
+}
+
+@media (max-width: 640px) {
+  .app-loader__content {
+    padding: 1.4rem;
+  }
+
+  .app-loader__coin {
+    width: min(14.25rem, 82vw);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-loader,
+  body[data-page-loader="intro"] .site-shell,
+  body[data-page-loader="intro"] #marketCanvas,
+  .app-loader__logo-shell,
+  .app-loader__radar,
+  .app-loader__orbit,
+  .app-loader__locator {
+    transition: none;
+    animation: none;
+  }
+
+  .app-loader__progress-fill {
+    animation-duration: .65s;
+  }
+}
+
 .site-shell { position: relative; min-height: 100vh; overflow: hidden; }
 .animated-bg {
   position: fixed;

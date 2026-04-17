@@ -1,0 +1,44 @@
+<script>
+  (function () {
+    var navEntries = typeof performance.getEntriesByType === 'function' ? performance.getEntriesByType('navigation') : [];
+    var navType = navEntries && navEntries.length
+      ? navEntries[0].type
+      : ((performance.navigation && performance.navigation.type === 1) ? 'reload' : 'navigate');
+
+    if (navType === 'reload') {
+      document.body.classList.add('loader-active');
+    }
+  })();
+</script>
+<div id="appLoader" class="app-loader" aria-hidden="true">
+  <div class="app-loader__content">
+    <div class="app-loader__coin" role="presentation">
+      <span class="app-loader__radar app-loader__radar--outer"></span>
+      <span class="app-loader__radar app-loader__radar--inner"></span>
+      <span class="app-loader__orbit"></span>
+      <span class="app-loader__locator"></span>
+      <svg class="app-loader__progress" viewBox="0 0 220 220" aria-hidden="true">
+        <defs>
+          <linearGradient id="appLoaderRingGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#fff1ad" />
+            <stop offset="48%" stop-color="#f2c14e" />
+            <stop offset="100%" stop-color="#a86b18" />
+          </linearGradient>
+        </defs>
+        <circle class="app-loader__progress-track" cx="110" cy="110" r="98"></circle>
+        <circle class="app-loader__progress-fill" cx="110" cy="110" r="98"></circle>
+      </svg>
+      <div class="app-loader__logo-shell">
+        <img class="app-loader__logo" src="{{ url_for('static', filename='vaultsignals-logo.png') }}" alt="" />
+      </div>
+    </div>
+  </div>
+</div>
+<noscript>
+  <style>
+    #appLoader { display: none !important; }
+    body.loader-active[data-page-loader="intro"] { overflow: auto !important; }
+    body[data-page-loader="intro"] .site-shell,
+    body[data-page-loader="intro"] #marketCanvas { opacity: 1 !important; }
+  </style>
+</noscript>

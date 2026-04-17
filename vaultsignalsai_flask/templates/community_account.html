@@ -7,7 +7,8 @@
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='vaultsignals-logo.png') }}" />
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
   </head>
-  <body data-target-username="{{ target_username }}">
+  <body data-page-loader="intro" data-target-username="{{ target_username }}">
+    {% include 'sections/page_loader.html' %}
     <div class="site-shell">
       <main>
         <section class="section visible">
@@ -35,6 +36,7 @@
       </main>
     </div>
 
+    <script src="{{ url_for('static', filename='page_loader.js') }}"></script>
     <script src="{{ url_for('static', filename='badges.js') }}"></script>
     <script>
       function escapeHtml(value) {
