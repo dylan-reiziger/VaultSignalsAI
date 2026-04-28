@@ -349,18 +349,37 @@
                     </div>
                     <div class="checkout-right">
                       <div class="payment-method-bar" id="paymentMethodBar">
-                        <p class="payment-title">Payment Method</p>
+                        <div class="payment-head">
+                          <p class="payment-title">Payment Method</p>
+                          <span class="payment-guard">Bank-grade encryption</span>
+                        </div>
                         <div class="payment-options">
                           <button type="button" class="payment-method-btn active" data-payment-method="creditcard">
-                            <span class="pm-icon">💳</span><span class="pm-label">Credit Card</span>
+                            <span class="pm-icon-wrap"><span class="pm-icon">💳</span></span>
+                            <span class="pm-copy">
+                              <span class="pm-label">Credit Card</span>
+                              <span class="pm-meta">Instant confirmation</span>
+                            </span>
+                            <span class="pm-chip">Popular</span>
                           </button>
                           <button type="button" class="payment-method-btn" data-payment-method="ideal">
-                            <span class="pm-icon">🏦</span><span class="pm-label">iDEAL</span>
+                            <span class="pm-icon-wrap"><span class="pm-icon">🏦</span></span>
+                            <span class="pm-copy">
+                              <span class="pm-label">iDEAL</span>
+                              <span class="pm-meta">Trusted in the Netherlands</span>
+                            </span>
+                            <span class="pm-chip">Local</span>
                           </button>
                           <button type="button" class="payment-method-btn" data-payment-method="paypal">
-                            <span class="pm-icon">🅿️</span><span class="pm-label">PayPal</span>
+                            <span class="pm-icon-wrap"><span class="pm-icon">🅿️</span></span>
+                            <span class="pm-copy">
+                              <span class="pm-label">PayPal</span>
+                              <span class="pm-meta">Fast wallet checkout</span>
+                            </span>
+                            <span class="pm-chip">Wallet</span>
                           </button>
                         </div>
+                        <p class="payment-disclaimer">You will be redirected to your selected provider to complete payment securely.</p>
                       </div>
                     </div>
                   </div>
