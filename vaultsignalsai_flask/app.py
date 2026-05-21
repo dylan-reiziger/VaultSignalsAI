@@ -222,12 +222,25 @@ DEFAULT_STOCK_FEED = [
     {"symbol": "AMZN", "name": "Amazon", "price": 156.92, "change": -0.92},
 ]
 STATIC_STOCK_FEED = _json_env("STATIC_STOCK_FEED", DEFAULT_STOCK_FEED)
+STOCK_SIGNAL_SYMBOLS = [
+    symbol.upper()
+    for symbol in _csv_env("STOCK_SIGNAL_SYMBOLS", "AAPL,MSFT,NVDA,TSLA,AMZN,META,SPY,QQQ")
+    if re.match(r"^[A-Z0-9.\-^=]{1,12}$", symbol.upper())
+]
+if not STOCK_SIGNAL_SYMBOLS:
+    STOCK_SIGNAL_SYMBOLS = ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "META", "SPY", "QQQ"]
+STOCK_SIGNAL_DEFAULT_LIMIT = int(os.getenv("STOCK_SIGNAL_DEFAULT_LIMIT", "6"))
+STOCK_SIGNAL_MIN_CONFIDENCE = int(os.getenv("STOCK_SIGNAL_MIN_CONFIDENCE", "60"))
+STOCK_SIGNAL_CACHE_TTL_SECONDS = int(os.getenv("STOCK_SIGNAL_CACHE_TTL_SECONDS", "12"))
+YAHOO_FINANCE_CHART_BASE_URL = os.getenv("YAHOO_FINANCE_CHART_BASE_URL", "https://query1.finance.yahoo.com/v8/finance/chart").rstrip("/")
+YAHOO_FINANCE_USER_AGENT = os.getenv("YAHOO_FINANCE_USER_AGENT", "Mozilla/5.0")
 ALLOWED_CORS_ORIGINS = set(_csv_env("ALLOWED_CORS_ORIGINS", ""))
 ADMIN_USERNAMES = {username.lower() for username in _csv_env("ADMIN_USERNAMES", "admin")}
 AUTO_ADMIN_EMAILS = {email.strip().lower() for email in _csv_env("AUTO_ADMIN_EMAILS", "dylan.reiziger@hotmail.com") if email.strip()}
 _AUTH_REQUEST_LOG: dict[str, list[float]] = {}
 _MARKET_CACHE: dict[str, Any] = {"payload": None, "updated_at": 0.0}
 _LIVE_DESK_CACHE: dict[str, dict[str, Any]] = {}
+_STOCK_SIGNAL_CACHE: dict[str, dict[str, Any]] = {}
 _FX_CACHE: dict[str, Any] = {"payload": None, "updated_at": 0.0}
 MAX_LENGTHS = {
     "username": 50,
@@ -1474,6 +1487,265 @@ def request_json_with_retry(
     return None
 
 
+def clamp_int_value(raw_value: Any, minimum: int, maximum: int, fallback: int) -> int:
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        return fallback
+    return max(minimum, min(maximum, parsed))
+
+
+def resolve_stock_signal_symbols(raw_value: str | None) -> list[str]:
+    if not raw_value:
+        return STOCK_SIGNAL_SYMBOLS
+
+    parsed_symbols: list[str] = []
+    for chunk in str(raw_value).split(","):
+        symbol = chunk.strip().upper()
+        if not symbol:
+            continue
+        if not re.match(r"^[A-Z0-9.\-^=]{1,12}$", symbol):
+            continue
+        parsed_symbols.append(symbol)
+
+    return parsed_symbols or STOCK_SIGNAL_SYMBOLS
+
+
+def calculate_ema_series(values: list[float], period: int) -> list[float]:
+    if not values:
+        return []
+
+    smooth_period = max(1, period)
+    multiplier = 2 / (smooth_period + 1)
+    ema_values = [float(values[0])]
+    for raw_value in values[1:]:
+        current_value = float(raw_value)
+        ema_values.append((current_value - ema_values[-1]) * multiplier + ema_values[-1])
+    return ema_values
+
+
+def calculate_rsi_value(values: list[float], period: int = 14) -> float:
+    if len(values) < period + 1:
+        return 50.0
+
+    gains = 0.0
+    losses = 0.0
+    for index in range(len(values) - period, len(values)):
+        delta = float(values[index]) - float(values[index - 1])
+        if delta > 0:
+            gains += delta
+        else:
+            losses += abs(delta)
+
+    if losses == 0:
+        return 100.0 if gains > 0 else 50.0
+
+    average_gain = gains / period
+    average_loss = losses / period
+    if average_loss == 0:
+        return 100.0
+
+    relative_strength = average_gain / average_loss
+    return 100 - (100 / (1 + relative_strength))
+
+
+def stock_confidence_label(score: int) -> str:
+    if score >= 90:
+        return "Elite"
+    if score >= 84:
+        return "Pro"
+    if score >= 78:
+        return "Premium"
+    if score >= 72:
+        return "Core+"
+    return "Core"
+
+
+def fetch_yahoo_stock_snapshot(symbol: str) -> dict[str, Any] | None:
+    payload = request_json_with_retry(
+        f"{YAHOO_FINANCE_CHART_BASE_URL}/{symbol}",
+        {
+            "interval": "1m",
+            "range": "1d",
+            "includePrePost": "false",
+            "events": "div,splits",
+        },
+        timeout=REQUEST_TIMEOUT_SECONDS,
+        retries=REQUEST_RETRIES,
+        headers={"User-Agent": YAHOO_FINANCE_USER_AGENT},
+    )
+    if not isinstance(payload, dict):
+        return None
+
+    result_rows = ((payload.get("chart") or {}).get("result") or [])
+    if not result_rows or not isinstance(result_rows, list):
+        return None
+
+    result = result_rows[0]
+    timestamps = result.get("timestamp") or []
+    quote_rows = ((result.get("indicators") or {}).get("quote") or [{}])
+    quote = quote_rows[0] if quote_rows and isinstance(quote_rows[0], dict) else {}
+    closes = quote.get("close") or []
+    volumes = quote.get("volume") or []
+    if not isinstance(timestamps, list) or not isinstance(closes, list):
+        return None
+
+    clean_rows: list[tuple[int, float, float]] = []
+    for index, raw_timestamp in enumerate(timestamps):
+        if index >= len(closes):
+            break
+        raw_close = closes[index]
+        if raw_close is None:
+            continue
+
+        try:
+            timestamp = int(raw_timestamp)
+            close_price = float(raw_close)
+        except (TypeError, ValueError):
+            continue
+
+        raw_volume = volumes[index] if index < len(volumes) and volumes[index] is not None else 0
+        try:
+            volume = max(0.0, float(raw_volume))
+        except (TypeError, ValueError):
+            volume = 0.0
+
+        clean_rows.append((timestamp, close_price, volume))
+
+    if len(clean_rows) < 30:
+        return None
+
+    meta = result.get("meta") if isinstance(result.get("meta"), dict) else {}
+    return {
+        "symbol": symbol.upper(),
+        "name": str(meta.get("shortName") or meta.get("symbol") or symbol.upper()),
+        "exchange": str(meta.get("exchangeName") or "US Equities"),
+        "rows": clean_rows,
+    }
+
+
+def build_ai_stock_signal(snapshot: dict[str, Any]) -> dict[str, Any] | None:
+    rows = snapshot.get("rows")
+    if not isinstance(rows, list) or len(rows) < 30:
+        return None
+
+    closes = [float(row[1]) for row in rows][-180:]
+    volumes = [float(row[2]) for row in rows][-180:]
+    if len(closes) < 30:
+        return None
+
+    ema_short = calculate_ema_series(closes, period=6)
+    ema_long = calculate_ema_series(closes, period=21)
+    if len(ema_short) < 2 or len(ema_long) < 2:
+        return None
+
+    latest_price = closes[-1]
+    momentum_anchor = closes[-8] if len(closes) >= 8 else closes[0]
+    momentum_pct = ((latest_price - momentum_anchor) / momentum_anchor * 100) if momentum_anchor > 0 else 0.0
+    rsi_value = calculate_rsi_value(closes, period=14)
+    recent_high = max(closes[-20:])
+    trend_up = ema_short[-1] > ema_long[-1]
+    fresh_cross = ema_short[-2] <= ema_long[-2] and trend_up
+    breakout = latest_price >= (recent_high * 0.997)
+
+    recent_volumes = volumes[-20:]
+    avg_volume = sum(recent_volumes) / max(1, len(recent_volumes))
+    latest_volume = recent_volumes[-1] if recent_volumes else 0.0
+    volume_ratio = (latest_volume / avg_volume) if avg_volume > 0 else 1.0
+
+    score = 35
+    if trend_up:
+        score += 16
+    if fresh_cross:
+        score += 18
+    if momentum_pct >= 0.40:
+        score += 16
+    elif momentum_pct >= 0.10:
+        score += 10
+    elif momentum_pct < -0.20:
+        score -= 10
+    if 50 <= rsi_value <= 72:
+        score += 12
+    elif rsi_value < 40:
+        score -= 8
+    elif rsi_value > 80:
+        score -= 6
+    if volume_ratio >= 1.2:
+        score += 10
+    elif volume_ratio < 0.75:
+        score -= 5
+    if breakout:
+        score += 8
+
+    confidence = max(1, min(99, int(round(score))))
+    if not trend_up or confidence < STOCK_SIGNAL_MIN_CONFIDENCE:
+        return None
+
+    target_move_pct = min(2.10, max(0.35, abs(momentum_pct) * 1.25 + 0.50))
+    stop_move_pct = min(1.20, max(0.25, target_move_pct / 2.25))
+
+    target_price = latest_price * (1 + target_move_pct / 100)
+    stop_price = latest_price * (1 - stop_move_pct / 100)
+    risk = max(0.0001, latest_price - stop_price)
+    reward = max(0.0001, target_price - latest_price)
+    risk_reward = round(reward / risk, 2)
+
+    signal_timestamp = int(rows[-1][0])
+    signal_dt = datetime.fromtimestamp(signal_timestamp, UTC)
+    signal_day = signal_dt.strftime("%Y-%m-%d")
+    signal_time = signal_dt.strftime("%H:%M")
+
+    symbol = str(snapshot.get("symbol") or "").upper() or "UNKNOWN"
+    insight = (
+        f"{symbol} momentum engine detected a bullish setup: "
+        f"short EMA is above long EMA, RSI {rsi_value:.1f}, "
+        f"{momentum_pct:+.2f}% move over recent bars, volume ratio {volume_ratio:.2f}."
+    )
+
+    return {
+        "id": f"stock-ai-{symbol}-{signal_day}-{signal_time}-BUY",
+        "assetSymbol": symbol,
+        "market": str(snapshot.get("exchange") or "US Equities"),
+        "direction": "Long",
+        "aiAction": "BUY",
+        "aiConfidence": confidence,
+        "confidenceLabel": stock_confidence_label(confidence),
+        "aiInsight": insight,
+        "entryPrice": round(latest_price, 4),
+        "targetPrice": round(target_price, 4),
+        "stopPrice": round(stop_price, 4),
+        "riskReward": risk_reward,
+        "momentumPct": round(momentum_pct, 3),
+        "signalTimeUtc": signal_time,
+        "signalDay": signal_day,
+        "status": "published",
+        "timerMinutes": 45,
+        "source": "ai_stock_engine",
+    }
+
+
+def generate_live_stock_signals(symbols: list[str], limit: int) -> list[dict[str, Any]]:
+    signals: list[dict[str, Any]] = []
+    for symbol in symbols:
+        snapshot = fetch_yahoo_stock_snapshot(symbol)
+        if snapshot is None:
+            continue
+
+        signal = build_ai_stock_signal(snapshot)
+        if signal is None:
+            continue
+        signals.append(signal)
+
+    signals.sort(
+        key=lambda row: (
+            -int(row.get("aiConfidence") or 0),
+            -float(row.get("momentumPct") or 0.0),
+            str(row.get("assetSymbol") or ""),
+        )
+    )
+    return signals[: max(1, limit)]
+
+
 def convert_market_quote_amount(amount: Any, from_currency: str = "EUR", to_currency: str = "USD") -> float:
     try:
         numeric_amount = float(amount or 0)
@@ -2688,6 +2960,41 @@ def pro_signals() -> tuple[Any, int]:
     }), 200
 
 
+@app.get("/api/ai/stock-signals")
+def ai_stock_signals() -> tuple[Any, int]:
+    if g.current_account is None:
+        return jsonify({"ok": False, "message": "Login required."}), 401
+
+    symbols = resolve_stock_signal_symbols(str(request.args.get("symbols", "")).strip() or None)
+    default_limit = max(1, min(20, STOCK_SIGNAL_DEFAULT_LIMIT))
+    limit = clamp_int_value(request.args.get("limit"), 1, 20, default_limit)
+
+    cache_key = f"{','.join(symbols)}:{limit}"
+    cached_entry = _STOCK_SIGNAL_CACHE.get(cache_key)
+    if cached_entry and (time.time() - float(cached_entry.get("updated_at", 0) or 0)) < STOCK_SIGNAL_CACHE_TTL_SECONDS:
+        return jsonify(cached_entry.get("payload", {})), 200
+
+    signals = generate_live_stock_signals(symbols, limit)
+    payload = {
+        "ok": True,
+        "signals": signals,
+        "meta": {
+            "provider": "Yahoo Finance",
+            "engine": "Momentum RSI signal engine",
+            "trackedSymbols": symbols,
+            "generatedAtUtc": utc_now().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "cacheTtlSeconds": STOCK_SIGNAL_CACHE_TTL_SECONDS,
+            "minimumConfidence": STOCK_SIGNAL_MIN_CONFIDENCE,
+        },
+    }
+
+    if not signals and cached_entry and cached_entry.get("payload"):
+        return jsonify(cached_entry["payload"]), 200
+
+    _STOCK_SIGNAL_CACHE[cache_key] = {"payload": payload, "updated_at": time.time()}
+    return jsonify(payload), 200
+
+
 @app.route("/admin/signals")
 def admin_signals_page() -> str:
     if g.current_account is None:
@@ -3098,6 +3405,56 @@ def login() -> tuple[Any, int]:
         {
             "ok": True,
             "message": "Login successful.",
+            "user": serialize_account(user),
+            "currency": resolve_currency_preference(user),
+        }
+    )
+    return attach_auth_state(response, int(user["id"]), remember_me), 200
+
+
+@app.post("/api/client-login")
+def client_login() -> tuple[Any, int]:
+    if is_rate_limited(_client_key()):
+        log_security_event(None, "client_login", "rate_limited")
+        return jsonify({"ok": False, "allowed": False, "message": "Too many login attempts. Please wait a few minutes."}), 429
+
+    payload = request.get_json(silent=True) or {}
+    username_or_email = str(payload.get("username", "")).strip().lower()
+    password = str(payload.get("password", ""))
+    remember_me = bool(payload.get("rememberMe", True))
+
+    if not username_or_email or not password:
+        log_security_event(None, "client_login", "validation_failed")
+        return jsonify({"ok": False, "allowed": False, "message": "Username and password are required."}), 400
+
+    with get_db() as conn:
+        auth_row = conn.execute(
+            "SELECT id, password_hash FROM accounts WHERE lower(username) = ? OR lower(email) = ? LIMIT 1",
+            (username_or_email, username_or_email),
+        ).fetchone()
+
+        if auth_row is None or not check_password_hash(auth_row["password_hash"], password):
+            log_security_event(auth_row["id"] if auth_row else None, "client_login", "failed")
+            return jsonify({"ok": False, "allowed": False, "message": "Invalid username/email or password."}), 401
+
+        user = fetch_account_by_id(conn, int(auth_row["id"]))
+        if user is not None:
+            sync_discord_verification_for_account(
+                conn,
+                int(user["id"]),
+                decrypt_value(user["discord_username_enc"]) or user["discord_username"],
+            )
+            user = fetch_account_by_id(conn, int(user["id"]))
+
+    if user is None:
+        return jsonify({"ok": False, "allowed": False, "message": "Login failed."}), 401
+
+    log_security_event(user["id"], "client_login", "success")
+    response = jsonify(
+        {
+            "ok": True,
+            "allowed": True,
+            "message": "Client login successful.",
             "user": serialize_account(user),
             "currency": resolve_currency_preference(user),
         }
