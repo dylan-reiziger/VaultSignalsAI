@@ -154,16 +154,28 @@
       function renderDashboard(data) {
         const member = data.member;
         const loyalty = data.loyalty;
+        const lastSignalCashout = data.lastSignalCashout || null;
+        const joinedDate = loyalty.customerSince ? new Date(loyalty.customerSince) : null;
+        const joinedLabel = joinedDate && !Number.isNaN(joinedDate.getTime()) ? joinedDate.toLocaleDateString() : 'Recently joined';
+        const cashoutAmount = lastSignalCashout && typeof lastSignalCashout.amount === 'number'
+          ? formatSignedCashout(lastSignalCashout.amount)
+          : 'No data';
+        const cashoutAmountClass = !lastSignalCashout || typeof lastSignalCashout.amount !== 'number'
+          ? ''
+          : (Number(lastSignalCashout.amount) > 0 ? 'loyalty-cashout-positive' : Number(lastSignalCashout.amount) < 0 ? 'loyalty-cashout-negative' : '');
+        const cashoutMeta = lastSignalCashout
+          ? `${formatCashoutOutcome(lastSignalCashout.outcome)} on ${formatCashoutDate(lastSignalCashout.createdAt)}${lastSignalCashout.note ? ` • ${lastSignalCashout.note}` : ''}`
+          : 'Record what your latest signal won or lost.';
         
         // Update welcome
         document.getElementById('accountWelcome').textContent = `${member.fullName || member.username}, ${loyalty.loyaltyLevel.toUpperCase()} member`;
-        document.getElementById('loyaltyDescription').textContent = `Joined ${new Date(loyalty.customerSince).toLocaleDateString()} • ${loyalty.monthsActive} months active`;
+        document.getElementById('loyaltyDescription').textContent = `Joined ${joinedLabel} • ${loyalty.monthsActive} months active`;
         
         // Render loyalty stats
         const loyaltyStatsHtml = `
           <article class="panel-card loyalty-stat-card">
             <span class="eyebrow">Member Since</span>
-            <h3>${new Date(loyalty.customerSince).toLocaleDateString()}</h3>
+            <h3>${joinedLabel}</h3>
             <p>Trusted for ${loyalty.monthsActive} month${loyalty.monthsActive !== 1 ? 's' : ''}</p>
           </article>
           <article class="panel-card loyalty-stat-card">
@@ -172,9 +184,13 @@
             <p>Signals purchased and unlocked</p>
           </article>
           <article class="panel-card loyalty-stat-card">
-            <span class="eyebrow">Loyalty Level</span>
-            <h3>${loyalty.loyaltyLevel.charAt(0).toUpperCase() + loyalty.loyaltyLevel.slice(1)}</h3>
-            <p>${getLoyaltyBenefit(loyalty.loyaltyLevel)}</p>
+            <span class="eyebrow">Last Signal Cashout</span>
+            <h3 class="${cashoutAmountClass}">${cashoutAmount}</h3>
+            <p>${escapeHtml(cashoutMeta)}</p>
+            <div class="loyalty-card-actions">
+              <button id="dashboardRecordCashoutBtn" class="ghost-btn" type="button">Record</button>
+              <button id="dashboardShareCashoutBtn" class="ghost-btn" type="button" ${lastSignalCashout ? '' : 'disabled'}>Share to Community</button>
+            </div>
           </article>
           <article class="panel-card loyalty-stat-card">
             <span class="eyebrow">Active Subscriptions</span>
@@ -183,6 +199,7 @@
           </article>
         `;
         document.getElementById('loyaltyStats').innerHTML = loyaltyStatsHtml;
+        wireDashboardCashoutActions();
         
         // Render badges
         const badgesHtml = (loyalty.badges || []).map(renderBadgeCard).join('');
@@ -228,14 +245,110 @@
         document.getElementById('transactionHistoryContainer').innerHTML = transactionsHtml;
       }
 
-      function getLoyaltyBenefit(level) {
-        const benefits = {
-          bronze: 'Get started with signals',
-          silver: '+3 months bonus on the first month',
-          gold: '+1 week bonus per purchase',
-          diamond: 'VIP access + dedicated support',
-        };
-        return benefits[level] || 'Keep earning rewards';
+      function formatSignedCashout(value) {
+        const amount = Number(value || 0);
+        if (!Number.isFinite(amount)) {
+          return '£0.00';
+        }
+        const display = `£${Math.abs(amount).toFixed(2)}`;
+        if (amount > 0) {
+          return `+${display}`;
+        }
+        if (amount < 0) {
+          return `-${display}`;
+        }
+        return display;
+      }
+
+      function formatCashoutOutcome(outcome) {
+        if (outcome === 'won') {
+          return 'Won';
+        }
+        if (outcome === 'lost') {
+          return 'Lost';
+        }
+        return 'Break-even';
+      }
+
+      function formatCashoutDate(rawValue) {
+        if (!rawValue) {
+          return 'recently';
+        }
+        const parsed = new Date(rawValue);
+        if (Number.isNaN(parsed.getTime())) {
+          return 'recently';
+        }
+        return parsed.toLocaleString();
+      }
+
+      function parseCashoutAmount(rawValue) {
+        const cleaned = String(rawValue ?? '').trim().replace(/,/g, '');
+        if (!cleaned) {
+          return null;
+        }
+        const parsed = Number(cleaned);
+        if (!Number.isFinite(parsed)) {
+          return null;
+        }
+        return parsed;
+      }
+
+      function wireDashboardCashoutActions() {
+        const recordButton = document.getElementById('dashboardRecordCashoutBtn');
+        const shareButton = document.getElementById('dashboardShareCashoutBtn');
+
+        recordButton?.addEventListener('click', async () => {
+          const amountRaw = window.prompt('Enter your last signal cashout amount. Use a negative amount for a loss.', '0');
+          if (amountRaw === null) {
+            return;
+          }
+          const amount = parseCashoutAmount(amountRaw);
+          if (amount === null) {
+            window.alert('Please enter a valid number.');
+            return;
+          }
+
+          const noteRaw = window.prompt('Optional note (asset or setup):', '');
+          if (noteRaw === null) {
+            return;
+          }
+
+          try {
+            const response = await fetch('/api/community/cashout', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ amount, note: (noteRaw || '').trim() }),
+            });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              window.alert(result.message || 'Could not record cashout.');
+              return;
+            }
+            await loadDashboard();
+          } catch (error) {
+            console.error('Cashout record failed:', error);
+            window.alert('Could not record cashout right now.');
+          }
+        });
+
+        shareButton?.addEventListener('click', async () => {
+          try {
+            const response = await fetch('/api/community/cashout/share', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+            });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              window.alert(result.message || 'Could not share cashout.');
+              return;
+            }
+            window.alert(result.message || 'Cashout shared to community.');
+            await loadDashboard();
+          } catch (error) {
+            console.error('Cashout share failed:', error);
+            window.alert('Could not share cashout right now.');
+          }
+        });
       }
 
       // Load on page load

@@ -75,14 +75,6 @@
     return `${diffDays}d ago`;
   }
 
-  function toTitleCase(value) {
-    return String(value || '')
-      .split(/\s+/)
-      .filter(Boolean)
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-      .join(' ');
-  }
-
   async function requestJson(url, options = {}) {
     const response = await fetch(url, {
       ...options,
@@ -114,6 +106,77 @@
     } catch {
       return `${currencySymbol}${amount.toFixed(2)}`;
     }
+  }
+
+  function formatSignedMoney(value) {
+    const amount = Number(value || 0);
+    if (!Number.isFinite(amount)) {
+      return `${currencySymbol}0.00`;
+    }
+    const formatted = formatMoney(Math.abs(amount));
+    if (amount > 0) {
+      return `+${formatted}`;
+    }
+    if (amount < 0) {
+      return `-${formatted}`;
+    }
+    return formatted;
+  }
+
+  function renderLastSignalCashout(cashout) {
+    const amountNode = $('communityLastCashout');
+    const metaNode = $('communityLastCashoutMeta');
+    const shareButton = $('communityShareCashoutBtn');
+
+    if (!amountNode || !metaNode) {
+      return;
+    }
+
+    amountNode.classList.remove('community-cashout-positive', 'community-cashout-negative', 'community-cashout-neutral');
+
+    if (!cashout || typeof cashout.amount !== 'number') {
+      amountNode.textContent = 'No data';
+      amountNode.classList.add('community-cashout-neutral');
+      metaNode.textContent = 'Record your latest signal win or loss.';
+      if (shareButton) {
+        shareButton.disabled = true;
+      }
+      return;
+    }
+
+    amountNode.textContent = formatSignedMoney(cashout.amount);
+    const amount = Number(cashout.amount || 0);
+    if (amount > 0) {
+      amountNode.classList.add('community-cashout-positive');
+    } else if (amount < 0) {
+      amountNode.classList.add('community-cashout-negative');
+    } else {
+      amountNode.classList.add('community-cashout-neutral');
+    }
+
+    const outcomeText = cashout.outcome === 'won'
+      ? 'Won'
+      : cashout.outcome === 'lost'
+        ? 'Lost'
+        : 'Break-even';
+    const timeText = cashout.createdAt ? formatRelativeTime(cashout.createdAt) : 'recently';
+    const noteText = cashout.note ? ` • ${cashout.note}` : '';
+    metaNode.textContent = `${outcomeText} ${timeText}${noteText}`;
+    if (shareButton) {
+      shareButton.disabled = false;
+    }
+  }
+
+  function parseCashoutInput(rawValue) {
+    const cleaned = String(rawValue ?? '').trim().replace(/,/g, '');
+    if (!cleaned) {
+      return null;
+    }
+    const parsed = Number(cleaned);
+    if (!Number.isFinite(parsed)) {
+      return null;
+    }
+    return parsed;
   }
 
   function setSettingsMessage(message, ok) {
@@ -195,11 +258,10 @@
     communityState.summary = data;
     const account = data.account || {};
     const balance = data.balance || {};
-    const summary = data.summary || {};
     const connections = account.connectionCounts || {};
     const privacyMode = account.privacyMode || 'public';
-    const loyaltyLevel = toTitleCase(account.loyaltyLevel || 'bronze');
     const renameNote = $('communityRenameNote');
+    const cashout = data.lastSignalCashout || null;
 
     if ($('communityDisplayName')) $('communityDisplayName').textContent = account.displayName || account.username || 'Member';
     if ($('communityTierBadge')) $('communityTierBadge').textContent = account.tierBadge || 'No Tier';
@@ -207,19 +269,18 @@
     if ($('communityAvatar')) $('communityAvatar').src = account.avatarUrl || '/static/vaultsignals-logo.png';
     if ($('communityAvatarInput')) $('communityAvatarInput').value = account.avatarUrl || '';
     if ($('communityBalance')) $('communityBalance').textContent = formatMoney(balance.current);
-    if ($('communityInvested')) $('communityInvested').textContent = formatMoney(summary.lifetime?.invested);
-    if ($('communityProfit')) $('communityProfit').textContent = formatMoney(summary.lifetime?.profit);
+    if ($('communityInvested')) $('communityInvested').textContent = formatMoney(balance.totalInvested);
+    if ($('communityProfit')) $('communityProfit').textContent = formatMoney(balance.totalProfit);
     if ($('communityConnectionsCount')) $('communityConnectionsCount').textContent = String(connections.connections || 0);
     if ($('communityIncomingCount')) $('communityIncomingCount').textContent = String(connections.incoming || 0);
     if ($('communityOutgoingCount')) $('communityOutgoingCount').textContent = String(connections.outgoing || 0);
-    if ($('communityLoyaltyLevel')) $('communityLoyaltyLevel').textContent = loyaltyLevel;
-    if ($('communityPrivacyState')) $('communityPrivacyState').textContent = privacyMode === 'private' ? 'Private profile' : 'Public profile';
     if ($('communityBio')) $('communityBio').textContent = account.bio || 'Add a short trading bio so people know what kind of setups you focus on.';
     if ($('communityBioInput')) $('communityBioInput').value = account.bio || '';
     if ($('communityPrivacyMode')) $('communityPrivacyMode').value = privacyMode;
     if ($('communityLeaderboardToggle')) $('communityLeaderboardToggle').checked = Boolean(account.showOnLeaderboard);
     if ($('communityIgnoreWhisper')) $('communityIgnoreWhisper').checked = Boolean(account.ignoreWhisper);
     if ($('communityBadgeStrip')) $('communityBadgeStrip').innerHTML = buildBadgeMarkup(data.badges, 'No badges unlocked yet.');
+    renderLastSignalCashout(cashout);
 
     if (renameNote) {
       const cooldownDays = Number(account.displayNameCooldownDays || 30);
@@ -232,6 +293,71 @@
 
     updateGlobalMeta();
     updateWhisperMeta();
+  }
+
+  async function recordLastCashout() {
+    const amountRaw = window.prompt('Enter your last signal cashout amount. Use a negative value for a loss.', '0');
+    if (amountRaw === null) {
+      return;
+    }
+    const amount = parseCashoutInput(amountRaw);
+    if (amount === null) {
+      setSettingsMessage('Enter a valid number for cashout amount.', false);
+      return;
+    }
+
+    const noteRaw = window.prompt('Optional note (asset or setup):', '');
+    if (noteRaw === null) {
+      return;
+    }
+
+    const { response, result } = await requestJson('/api/community/cashout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        amount,
+        note: (noteRaw || '').trim(),
+      }),
+    });
+
+    if (!response.ok) {
+      setSettingsMessage(result.message || 'Could not record your cashout.', false);
+      return;
+    }
+
+    setSettingsMessage(result.message || 'Last signal cashout updated.', true);
+    await loadSummary();
+  }
+
+  async function shareLastCashout() {
+    const { response, result } = await requestJson('/api/community/cashout/share', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    if (!response.ok) {
+      setSettingsMessage(result.message || 'Could not share your cashout.', false);
+      return;
+    }
+
+    setSettingsMessage(result.message || 'Cashout shared to community.', true);
+    await Promise.all([loadSummary(), loadGlobalMessages()]);
+  }
+
+  function wireCashoutEvents() {
+    $('communityRecordCashoutBtn')?.addEventListener('click', () => {
+      recordLastCashout().catch((error) => {
+        console.error('Cashout record failed:', error);
+        setSettingsMessage('Could not record your cashout right now.', false);
+      });
+    });
+
+    $('communityShareCashoutBtn')?.addEventListener('click', () => {
+      shareLastCashout().catch((error) => {
+        console.error('Cashout share failed:', error);
+        setSettingsMessage('Could not share your cashout right now.', false);
+      });
+    });
   }
 
   async function loadSummary() {
@@ -1083,6 +1209,7 @@
     $('communityGlobalForm')?.addEventListener('submit', sendGlobalMessage);
     $('communityWhisperForm')?.addEventListener('submit', sendWhisperMessage);
     wireAvatarEdit();
+    wireCashoutEvents();
     wireTabEvents();
     wireModalEvents();
 

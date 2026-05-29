@@ -39,6 +39,12 @@ CREATE TABLE IF NOT EXISTS account_security_events (
     FOREIGN KEY (account_id) REFERENCES accounts(id)
 );
 
+CREATE TABLE IF NOT EXISTS auth_rate_limits (
+    client_key_hash TEXT PRIMARY KEY,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS auth_tokens (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id INTEGER NOT NULL,
@@ -89,6 +95,7 @@ CREATE TABLE IF NOT EXISTS account_custom_badges (
 CREATE INDEX IF NOT EXISTS idx_accounts_email ON accounts(email);
 CREATE INDEX IF NOT EXISTS idx_accounts_token_hash ON accounts(verification_token_hash);
 CREATE INDEX IF NOT EXISTS idx_security_events_account_id ON account_security_events(account_id);
+CREATE INDEX IF NOT EXISTS idx_auth_rate_limits_updated_at ON auth_rate_limits(updated_at);
 CREATE INDEX IF NOT EXISTS idx_auth_tokens_account_id ON auth_tokens(account_id);
 CREATE INDEX IF NOT EXISTS idx_auth_tokens_expires_at ON auth_tokens(expires_at);
 CREATE INDEX IF NOT EXISTS idx_discord_registry_username ON discord_member_registry(discord_username);

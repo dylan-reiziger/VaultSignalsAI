@@ -22,7 +22,7 @@
             <span id="communityTierBadge" class="community-tier-badge">No Tier</span>
           </div>
           <p id="communityRankBadge" class="community-rank-badge">Rank: -</p>
-          <p class="community-account-subtitle">Your public identity, loyalty signal, connection count, and visibility controls all sit here while the live floor stays open on the right.</p>
+          <p class="community-account-subtitle">Your public identity, last signal cashout, connection count, and visibility controls all sit here while the live floor stays open on the right.</p>
         </div>
       </div>
 
@@ -43,6 +43,7 @@
           <strong id="communityProfit">-</strong>
         </div>
       </div>
+      <p class="community-funding-note">Portfolio starts at GBP 0.00 for all members. The only way to add funds is by sending payment through PayPal so your account can be credited manually.</p>
 
       <div class="community-pulse-grid">
         <div class="community-pulse-card">
@@ -60,10 +61,14 @@
           <strong id="communityOutgoingCount">0</strong>
           <p>Sent invitations</p>
         </div>
-        <div class="community-pulse-card">
-          <span class="community-pulse-label">Loyalty</span>
-          <strong id="communityLoyaltyLevel">Bronze</strong>
-          <p id="communityPrivacyState">Public profile</p>
+        <div class="community-pulse-card community-pulse-card--cashout">
+          <span class="community-pulse-label">Last Signal Cashout</span>
+          <strong id="communityLastCashout">No data</strong>
+          <p id="communityLastCashoutMeta">Record your latest signal win or loss.</p>
+          <div class="community-pulse-actions">
+            <button id="communityRecordCashoutBtn" class="ghost-btn" type="button">Record</button>
+            <button id="communityShareCashoutBtn" class="ghost-btn" type="button" disabled>Share</button>
+          </div>
         </div>
       </div>
 

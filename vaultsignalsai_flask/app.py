@@ -20,6 +20,7 @@ from datetime import UTC, datetime, timedelta
 from cryptography.fernet import Fernet, InvalidToken
 
 from flask import Flask, Response, g, jsonify, redirect, render_template, request, session, url_for
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
 logging.basicConfig(
@@ -49,6 +50,8 @@ APP_BASE_URL = os.getenv("APP_BASE_URL", "http://127.0.0.1:5000").rstrip("/")
 APP_ENV = os.getenv("APP_ENV", os.getenv("FLASK_ENV", "development")).strip().lower()
 IS_DEV_ENV = APP_ENV in {"dev", "development", "local"} or os.getenv("FLASK_DEBUG", "false").lower() in {"1", "true", "yes"}
 BADGE_PREVIEW_ENABLED = os.getenv("BADGE_PREVIEW_ENABLED", "true" if IS_DEV_ENV else "false").lower() in {"1", "true", "yes"}
+TRUST_PROXY_COUNT = int(os.getenv("TRUST_PROXY_COUNT", "0" if IS_DEV_ENV else "1"))
+REDACTED_REQUIRED_FIELD_VALUE = "[encrypted]"
 
 PAYPAL_API_BASE_URL = os.getenv("PAYPAL_API_BASE_URL", "https://api-m.sandbox.paypal.com").rstrip("/")
 PAYPAL_CLIENT_ID = os.getenv("PAYPAL_CLIENT_ID", "").strip()
@@ -60,12 +63,20 @@ app.config.update(
     SECRET_KEY=APP_SECRET_KEY,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=os.getenv("SESSION_COOKIE_SECURE", "false").lower() in {"1", "true", "yes"},
+    SESSION_COOKIE_SECURE=os.getenv("SESSION_COOKIE_SECURE", "false" if IS_DEV_ENV else "true").lower() in {"1", "true", "yes"},
     SEND_FILE_MAX_AGE_DEFAULT=0,
     TEMPLATES_AUTO_RELOAD=True,
 )
 
-COMMUNITY_DEFAULT_BALANCE = float(os.getenv("COMMUNITY_DEFAULT_BALANCE", "10000"))
+if TRUST_PROXY_COUNT > 0:
+    app.wsgi_app = ProxyFix(
+        app.wsgi_app,
+        x_for=TRUST_PROXY_COUNT,
+        x_proto=TRUST_PROXY_COUNT,
+        x_host=TRUST_PROXY_COUNT,
+    )
+
+COMMUNITY_DEFAULT_BALANCE = float(os.getenv("COMMUNITY_DEFAULT_BALANCE", "0"))
 COMMUNITY_MAX_CHAT_LENGTH = int(os.getenv("COMMUNITY_MAX_CHAT_LENGTH", "600"))
 COMMUNITY_MAX_POST_LENGTH = int(os.getenv("COMMUNITY_MAX_POST_LENGTH", "1200"))
 COMMUNITY_DEFAULT_AVATAR = os.getenv("COMMUNITY_DEFAULT_AVATAR", "/static/vaultsignals-logo.png")
@@ -81,6 +92,12 @@ def validate_security_configuration() -> None:
         raise RuntimeError("TOKEN_PEPPER must be set in non-development environments.")
     if not APP_SECRET_KEY or APP_SECRET_KEY == TOKEN_PEPPER:
         raise RuntimeError("APP_SECRET_KEY must be explicitly set and differ from TOKEN_PEPPER in non-development environments.")
+    if not ENCRYPTION_KEY:
+        raise RuntimeError("APP_DATA_ENCRYPTION_KEY must be set in non-development environments.")
+    if CIPHER is None:
+        raise RuntimeError("APP_DATA_ENCRYPTION_KEY is invalid. Provide a valid Fernet key in non-development environments.")
+    if not bool(app.config.get("SESSION_COOKIE_SECURE")):
+        raise RuntimeError("SESSION_COOKIE_SECURE must be enabled in non-development environments.")
 
 
 def _csv_env(env_name: str, default_csv: str) -> list[str]:
@@ -237,7 +254,6 @@ YAHOO_FINANCE_USER_AGENT = os.getenv("YAHOO_FINANCE_USER_AGENT", "Mozilla/5.0")
 ALLOWED_CORS_ORIGINS = set(_csv_env("ALLOWED_CORS_ORIGINS", ""))
 ADMIN_USERNAMES = {username.lower() for username in _csv_env("ADMIN_USERNAMES", "admin")}
 AUTO_ADMIN_EMAILS = {email.strip().lower() for email in _csv_env("AUTO_ADMIN_EMAILS", "dylan.reiziger@hotmail.com") if email.strip()}
-_AUTH_REQUEST_LOG: dict[str, list[float]] = {}
 _MARKET_CACHE: dict[str, Any] = {"payload": None, "updated_at": 0.0}
 _LIVE_DESK_CACHE: dict[str, dict[str, Any]] = {}
 _STOCK_SIGNAL_CACHE: dict[str, dict[str, Any]] = {}
@@ -423,6 +439,7 @@ def get_cipher() -> Fernet | None:
 
 
 CIPHER = get_cipher()
+validate_security_configuration()
 
 
 def encrypt_value(raw_value: str | None) -> str | None:
@@ -432,7 +449,7 @@ def encrypt_value(raw_value: str | None) -> str | None:
     if not value:
         return None
     if CIPHER is None:
-        return value
+        return value if IS_DEV_ENV else None
     return CIPHER.encrypt(value.encode("utf-8")).decode("utf-8")
 
 
@@ -443,11 +460,15 @@ def decrypt_value(raw_value: str | None) -> str | None:
     if not value:
         return None
     if CIPHER is None:
-        return value
+        return value if IS_DEV_ENV else None
     try:
         return CIPHER.decrypt(value.encode("utf-8")).decode("utf-8")
     except (InvalidToken, ValueError):
         return None
+
+
+def should_set_secure_cookie() -> bool:
+    return bool(app.config.get("SESSION_COOKIE_SECURE")) or request.is_secure
 
 
 def hash_token(raw_token: str) -> str:
@@ -770,7 +791,7 @@ def normalize_discord_username(raw_value: str) -> str:
 def sync_discord_verification_for_account(conn: sqlite3.Connection, account_id: int, raw_discord_username: str | None) -> tuple[str, str | None]:
     normalized_username = normalize_discord_username(raw_discord_username or "")
     if not normalized_username:
-        conn.execute("UPDATE accounts SET discord_tag = NULL WHERE id = ?", (account_id,))
+        conn.execute("UPDATE accounts SET discord_username = NULL, discord_username_enc = NULL, discord_tag = NULL WHERE id = ?", (account_id,))
         conn.execute(
             """
             INSERT INTO account_discord_verifications (account_id, discord_username, verification_status, verified_tag, checked_at, source)
@@ -799,8 +820,8 @@ def sync_discord_verification_for_account(conn: sqlite3.Connection, account_id: 
         verification_status = DISCORD_VERIFICATION_PENDING
 
     conn.execute(
-        "UPDATE accounts SET discord_username = ?, discord_username_enc = ?, discord_tag = ? WHERE id = ?",
-        (normalized_username, encrypt_value(normalized_username), verified_tag, account_id),
+        "UPDATE accounts SET discord_username = NULL, discord_username_enc = ?, discord_tag = ? WHERE id = ?",
+        (encrypt_value(normalized_username), verified_tag, account_id),
     )
     conn.execute(
         """
@@ -813,7 +834,7 @@ def sync_discord_verification_for_account(conn: sqlite3.Connection, account_id: 
           checked_at = CURRENT_TIMESTAMP,
           source = excluded.source
         """,
-        (account_id, normalized_username, verification_status, verified_tag, "system_registry"),
+        (account_id, None, verification_status, verified_tag, "system_registry"),
     )
     return verification_status, verified_tag
 
@@ -825,12 +846,17 @@ def set_currency_cookie(response: Response, currency_code: str) -> None:
         max_age=60 * 60 * 24 * 365,
         httponly=False,
         samesite="Lax",
-        secure=request.is_secure,
+        secure=should_set_secure_cookie(),
     )
 
 
 def clear_auth_cookie(response: Response) -> None:
-    response.delete_cookie(REMEMBER_COOKIE_NAME, samesite="Lax")
+    response.delete_cookie(
+        REMEMBER_COOKIE_NAME,
+        samesite="Lax",
+        httponly=True,
+        secure=should_set_secure_cookie(),
+    )
 
 
 def create_remember_token(conn: sqlite3.Connection, account_id: int) -> tuple[str, str]:
@@ -860,7 +886,7 @@ def attach_auth_state(response: Response, account_id: int, remember_me: bool) ->
         max_age=max_age,
         httponly=True,
         samesite="Lax",
-        secure=request.is_secure,
+        secure=should_set_secure_cookie(),
     )
     return response
 
@@ -1104,6 +1130,54 @@ def get_account_performance_summary(conn: sqlite3.Connection, account_id: int) -
         "monthly": {"invested": float(monthly["invested"] or 0), "profit": float(monthly["profit"] or 0)},
         "lifetime": {"invested": float(lifetime["invested"] or 0), "profit": float(lifetime["profit"] or 0)},
     }
+
+
+def format_signed_gbp(amount: float) -> str:
+    sign = "+" if amount > 0 else "-" if amount < 0 else ""
+    return f"{sign}GBP {abs(amount):,.2f}"
+
+
+def serialize_signal_cashout(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    amount = float((row["cashout_amount"] if row else 0) or 0)
+    if amount > 0:
+        outcome = "won"
+    elif amount < 0:
+        outcome = "lost"
+    else:
+        outcome = "break_even"
+    return {
+        "amount": amount,
+        "displayAmount": format_signed_gbp(amount),
+        "outcome": outcome,
+        "note": str((row["note"] if "note" in row.keys() else "") or "").strip(),
+        "sharedToCommunity": bool(row["shared_to_community"]) if "shared_to_community" in row.keys() else False,
+        "createdAt": row["created_at"] if "created_at" in row.keys() else None,
+    }
+
+
+def get_last_signal_cashout(conn: sqlite3.Connection, account_id: int) -> dict[str, Any] | None:
+    row = conn.execute(
+        "SELECT id, cashout_amount, note, shared_to_community, created_at FROM account_signal_cashouts WHERE account_id = ? ORDER BY created_at DESC, id DESC LIMIT 1",
+        (account_id,),
+    ).fetchone()
+    return serialize_signal_cashout(row)
+
+
+def build_cashout_share_message(cashout: dict[str, Any]) -> str:
+    outcome = str(cashout.get("outcome") or "break_even")
+    if outcome == "won":
+        outcome_label = "won"
+    elif outcome == "lost":
+        outcome_label = "lost"
+    else:
+        outcome_label = "broke even"
+    message = f"Last signal cashout: {cashout.get('displayAmount', 'GBP 0.00')} ({outcome_label})."
+    note = str(cashout.get("note") or "").strip()
+    if note:
+        message = f"{message} Note: {note[:120]}"
+    return message
 
 
 def build_display_name_policy(profile_row: sqlite3.Row | None) -> dict[str, Any]:
@@ -2076,12 +2150,19 @@ def build_market_summary(global_data: dict[str, Any] | None, crypto_rows: list[d
 
 
 def _client_key() -> str:
-    forwarded_for = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-    return forwarded_for or (request.remote_addr or "unknown")
+    if TRUST_PROXY_COUNT > 0:
+        forwarded_for = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        if forwarded_for:
+            return forwarded_for
+    return request.remote_addr or "unknown"
 
 
 def hash_ip(ip_value: str) -> str:
     return hashlib.sha256(f"ip:{TOKEN_PEPPER}:{ip_value}".encode("utf-8")).hexdigest()
+
+
+def hash_rate_limit_key(client_key: str) -> str:
+    return hashlib.sha256(f"rate_limit:{TOKEN_PEPPER}:{client_key}".encode("utf-8")).hexdigest()
 
 
 def log_security_event(account_id: int | None, event_type: str, event_status: str) -> None:
@@ -2106,14 +2187,55 @@ def is_rate_limited(client_key: str) -> bool:
     if IS_DEV_ENV and client_key in {"127.0.0.1", "::1", "localhost"}:
         return False
 
-    now = time.time()
-    request_times = _AUTH_REQUEST_LOG.get(client_key, [])
-    valid_times = [t for t in request_times if now - t <= AUTH_RATE_LIMIT_WINDOW_SECONDS]
-    limited = len(valid_times) >= AUTH_RATE_LIMIT_ATTEMPTS
-    if not limited:
-        valid_times.append(now)
-    _AUTH_REQUEST_LOG[client_key] = valid_times
-    return limited
+    rate_limit_key = hash_rate_limit_key(client_key)
+    now_dt = utc_now()
+    window_cutoff = now_dt - timedelta(seconds=max(1, AUTH_RATE_LIMIT_WINDOW_SECONDS))
+    cleanup_cutoff = now_dt - timedelta(seconds=max(3600, AUTH_RATE_LIMIT_WINDOW_SECONDS * 4))
+    now_db = format_db_timestamp(now_dt)
+    cleanup_db = format_db_timestamp(cleanup_cutoff)
+
+    if now_db is None or cleanup_db is None:
+        return False
+
+    try:
+        with get_db() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS auth_rate_limits (
+                    client_key_hash TEXT PRIMARY KEY,
+                    attempt_count INTEGER NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute("DELETE FROM auth_rate_limits WHERE updated_at < ?", (cleanup_db,))
+
+            row = conn.execute(
+                "SELECT attempt_count, updated_at FROM auth_rate_limits WHERE client_key_hash = ?",
+                (rate_limit_key,),
+            ).fetchone()
+
+            if row is None:
+                attempts = 1
+                conn.execute(
+                    "INSERT INTO auth_rate_limits (client_key_hash, attempt_count, updated_at) VALUES (?, ?, ?)",
+                    (rate_limit_key, attempts, now_db),
+                )
+            else:
+                last_updated = parse_db_timestamp(row["updated_at"])
+                if last_updated is not None and last_updated >= window_cutoff:
+                    attempts = int(row["attempt_count"] or 0) + 1
+                else:
+                    attempts = 1
+                conn.execute(
+                    "UPDATE auth_rate_limits SET attempt_count = ?, updated_at = ? WHERE client_key_hash = ?",
+                    (attempts, now_db, rate_limit_key),
+                )
+    except sqlite3.Error as exc:
+        logger.warning("Rate-limit storage unavailable; allowing request: %s", exc)
+        return False
+
+    return attempts > AUTH_RATE_LIMIT_ATTEMPTS
 
 
 @app.before_request
@@ -2213,6 +2335,15 @@ def init_db() -> None:
                 user_agent TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (account_id) REFERENCES accounts(id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS auth_rate_limits (
+                client_key_hash TEXT PRIMARY KEY,
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
@@ -2445,6 +2576,20 @@ def init_db() -> None:
 
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS account_signal_cashouts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL,
+                cashout_amount REAL NOT NULL,
+                note TEXT,
+                shared_to_community INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (account_id) REFERENCES accounts(id)
+            )
+            """
+        )
+
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS community_posts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 account_id INTEGER NOT NULL,
@@ -2599,6 +2744,10 @@ def init_db() -> None:
         ensure_column(conn, "account_balances", "balance_amount", "REAL NOT NULL DEFAULT 0")
         ensure_column(conn, "account_balances", "total_invested", "REAL NOT NULL DEFAULT 0")
         ensure_column(conn, "account_balances", "total_profit", "REAL NOT NULL DEFAULT 0")
+        ensure_column(conn, "account_signal_cashouts", "cashout_amount", "REAL NOT NULL DEFAULT 0")
+        ensure_column(conn, "account_signal_cashouts", "note", "TEXT")
+        ensure_column(conn, "account_signal_cashouts", "shared_to_community", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "account_signal_cashouts", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
 
         conn.execute("DROP TRIGGER IF EXISTS trg_accounts_force_verified_after_insert")
         conn.execute("DROP TRIGGER IF EXISTS trg_accounts_force_verified_after_update")
@@ -2681,6 +2830,7 @@ def init_db() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_security_events_account_id ON account_security_events(account_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_tokens_account_id ON auth_tokens(account_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_tokens_expires_at ON auth_tokens(expires_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_rate_limits_updated_at ON auth_rate_limits(updated_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_daily_signals_day_tier ON daily_signals(signal_day, tier_number)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_discord_registry_username ON discord_member_registry(discord_username)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_discord_verifications_account ON account_discord_verifications(account_id)")
@@ -2688,6 +2838,7 @@ def init_db() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_profiles_privacy ON community_profiles(privacy_mode, show_on_leaderboard)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_balances_account ON account_balances(account_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_account_day ON account_performance_snapshots(account_id, period_day)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_cashouts_account_time ON account_signal_cashouts(account_id, created_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_global_time ON chat_messages(channel_type, created_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_whisper_time ON chat_messages(sender_account_id, recipient_account_id, created_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_suspensions_account ON chat_suspensions(account_id, suspended_until)")
@@ -2697,13 +2848,18 @@ def init_db() -> None:
 
         # Backfill secure columns for existing rows.
         account_rows = conn.execute(
-            "SELECT id, full_name, full_name_enc, zipcode, zipcode_enc, address, address_enc, discord_username, discord_username_enc, verification_token, verification_token_hash FROM accounts"
+            "SELECT id, full_name, full_name_enc, phone_number, phone_number_enc, zipcode, zipcode_enc, address, address_enc, discord_username, discord_username_enc, verification_token, verification_token_hash FROM accounts"
         ).fetchall()
         for row in account_rows:
+            resolved_discord_username = decrypt_value(row["discord_username_enc"]) or row["discord_username"]
             conn.execute(
-                "UPDATE accounts SET full_name_enc = COALESCE(?, full_name_enc), zipcode_enc = COALESCE(?, zipcode_enc), address_enc = COALESCE(?, address_enc), discord_username_enc = COALESCE(?, discord_username_enc), verification_token_hash = COALESCE(?, verification_token_hash) WHERE id = ?",
+                "UPDATE accounts SET full_name = ?, zipcode = ?, address = ?, phone_number = NULL, discord_username = NULL, verification_token = NULL, full_name_enc = COALESCE(?, full_name_enc), phone_number_enc = COALESCE(?, phone_number_enc), zipcode_enc = COALESCE(?, zipcode_enc), address_enc = COALESCE(?, address_enc), discord_username_enc = COALESCE(?, discord_username_enc), verification_token_hash = COALESCE(?, verification_token_hash) WHERE id = ?",
                 (
+                    REDACTED_REQUIRED_FIELD_VALUE,
+                    REDACTED_REQUIRED_FIELD_VALUE,
+                    REDACTED_REQUIRED_FIELD_VALUE,
                     encrypt_value(row["full_name"]) if row["full_name"] and not row["full_name_enc"] else row["full_name_enc"],
+                    encrypt_value(row["phone_number"]) if row["phone_number"] and not row["phone_number_enc"] else row["phone_number_enc"],
                     encrypt_value(row["zipcode"]) if row["zipcode"] and not row["zipcode_enc"] else row["zipcode_enc"],
                     encrypt_value(row["address"]) if row["address"] and not row["address_enc"] else row["address_enc"],
                     encrypt_value(row["discord_username"]) if row["discord_username"] and not row["discord_username_enc"] else row["discord_username_enc"],
@@ -2711,14 +2867,14 @@ def init_db() -> None:
                     row["id"],
                 ),
             )
-            sync_discord_verification_for_account(conn, int(row["id"]), decrypt_value(row["discord_username_enc"]) or row["discord_username"])
+            sync_discord_verification_for_account(conn, int(row["id"]), resolved_discord_username)
 
         purchase_rows = conn.execute(
             "SELECT id, billing_name, billing_name_enc, billing_company, billing_company_enc, billing_address, billing_address_enc, billing_zip, billing_zip_enc, billing_country, billing_country_enc FROM purchases"
         ).fetchall()
         for row in purchase_rows:
             conn.execute(
-                "UPDATE purchases SET billing_name_enc = COALESCE(?, billing_name_enc), billing_company_enc = COALESCE(?, billing_company_enc), billing_address_enc = COALESCE(?, billing_address_enc), billing_zip_enc = COALESCE(?, billing_zip_enc), billing_country_enc = COALESCE(?, billing_country_enc) WHERE id = ?",
+                "UPDATE purchases SET billing_name = NULL, billing_company = NULL, billing_address = NULL, billing_zip = NULL, billing_country = NULL, discord_username = NULL, billing_name_enc = COALESCE(?, billing_name_enc), billing_company_enc = COALESCE(?, billing_company_enc), billing_address_enc = COALESCE(?, billing_address_enc), billing_zip_enc = COALESCE(?, billing_zip_enc), billing_country_enc = COALESCE(?, billing_country_enc) WHERE id = ?",
                 (
                     encrypt_value(row["billing_name"]) if row["billing_name"] and not row["billing_name_enc"] else row["billing_name_enc"],
                     encrypt_value(row["billing_company"]) if row["billing_company"] and not row["billing_company_enc"] else row["billing_company_enc"],
@@ -3311,15 +3467,15 @@ def create_account() -> tuple[Any, int]:
                 "INSERT INTO accounts (username, full_name, full_name_enc, email, password_hash, zipcode, zipcode_enc, address, address_enc, discord_username, discord_username_enc, discord_tag, verified, is_admin, data_consent_accepted, data_consent_accepted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
                 (
                     username,
-                    full_name,
+                    REDACTED_REQUIRED_FIELD_VALUE,
                     encrypt_value(full_name),
                     email,
                     password_hash,
-                    zipcode,
+                    REDACTED_REQUIRED_FIELD_VALUE,
                     encrypt_value(zipcode),
-                    address,
+                    REDACTED_REQUIRED_FIELD_VALUE,
                     encrypt_value(address),
-                    discord_username or None,
+                    None,
                     encrypt_value(discord_username) if discord_username else None,
                     None,
                     verified,
@@ -3464,21 +3620,24 @@ def client_login() -> tuple[Any, int]:
 
 @app.post("/api/auth/resend-verification")
 def resend_verification_email() -> tuple[Any, int]:
+    generic_message = "If an account exists for this email, verification guidance has been sent."
     payload = request.get_json(silent=True) or {}
     email = str(payload.get("email", "")).strip().lower()
     if not email:
-        return jsonify({"ok": False, "message": "Email is required."}), 400
+        return jsonify({"ok": True, "message": generic_message}), 200
 
     email_regex = r"^[\w\.-]+@[\w\.-]+\.\w+$"
     if not re.match(email_regex, email):
-        return jsonify({"ok": False, "message": "Enter a valid email address."}), 400
+        return jsonify({"ok": True, "message": generic_message}), 200
 
     with get_db() as conn:
         account = conn.execute("SELECT id FROM accounts WHERE email = ?", (email,)).fetchone()
-        if account is None:
-            return jsonify({"ok": False, "message": "Account not found for this email."}), 404
+        if account is not None:
+            log_security_event(int(account["id"]), "resend_verification", "accepted")
+        else:
+            log_security_event(None, "resend_verification", "accepted")
 
-    return jsonify({"ok": True, "message": "Account access is already enabled. Sign in with your email and password to continue."}), 200
+    return jsonify({"ok": True, "message": generic_message}), 200
 
 
 @app.post("/api/auth/change-unverified-email")
@@ -3688,7 +3847,7 @@ def update_account_profile() -> tuple[Any, int]:
             SET full_name = ?,
                 full_name_enc = ?,
                 email = ?,
-                phone_number = ?,
+                phone_number = NULL,
                 phone_number_enc = ?,
                 zipcode = ?,
                 zipcode_enc = ?,
@@ -3698,14 +3857,13 @@ def update_account_profile() -> tuple[Any, int]:
             WHERE id = ?
             """,
             (
-                full_name,
+                REDACTED_REQUIRED_FIELD_VALUE,
                 encrypt_value(full_name),
                 email,
-                phone_number or None,
                 encrypt_value(phone_number) if phone_number else None,
-                zipcode,
+                REDACTED_REQUIRED_FIELD_VALUE,
                 encrypt_value(zipcode),
-                address,
+                REDACTED_REQUIRED_FIELD_VALUE,
                 encrypt_value(address),
                 next_password_hash,
                 account_id,
@@ -3727,23 +3885,27 @@ def update_account_profile() -> tuple[Any, int]:
 
 @app.post("/api/account/discord")
 def update_account_discord() -> tuple[Any, int]:
+    if g.current_account is None:
+        return jsonify({"ok": False, "message": "Login required."}), 401
+
     payload = request.get_json(silent=True) or {}
     email = str(payload.get("email", "")).strip().lower()
     discord_username = normalize_discord_username(str(payload.get("discordUsername", "")))
+    account_id = int(g.current_account["id"])
+    current_email = str(g.current_account["email"] or "").strip().lower()
 
-    if not email or not discord_username:
-        log_security_event(None, "discord_update", "validation_failed")
-        return jsonify({"ok": False, "message": "Email and Discord username are required."}), 400
+    if not discord_username:
+        log_security_event(account_id, "discord_update", "validation_failed")
+        return jsonify({"ok": False, "message": "Discord username is required."}), 400
+
+    if email and email != current_email:
+        log_security_event(account_id, "discord_update", "email_mismatch")
+        return jsonify({"ok": False, "message": "Account mismatch."}), 403
 
     with get_db() as conn:
-        user = conn.execute("SELECT id FROM accounts WHERE email = ?", (email,)).fetchone()
-        if user is None:
-            log_security_event(None, "discord_update", "not_found")
-            return jsonify({"ok": False, "message": "Account not found."}), 404
+        verification_status, verified_tag = sync_discord_verification_for_account(conn, account_id, discord_username)
 
-        verification_status, verified_tag = sync_discord_verification_for_account(conn, int(user["id"]), discord_username)
-
-    log_security_event(user["id"], "discord_update", "success")
+    log_security_event(account_id, "discord_update", "success")
 
     return jsonify(
         {
@@ -3885,6 +4047,10 @@ def verify_email_by_token_input() -> tuple[Any, int]:
 
 @app.post("/api/purchase")
 def purchase() -> tuple[Any, int]:
+    if g.current_account is None:
+        log_security_event(None, "purchase", "login_required")
+        return jsonify({"ok": False, "message": "Log in before purchasing a tier."}), 401
+
     payload = request.get_json(silent=True) or {}
     email = str(payload.get("email", "")).strip().lower()
     tier_name = str(payload.get("tierName", "")).strip()
@@ -3899,10 +4065,11 @@ def purchase() -> tuple[Any, int]:
     billing_zip = str(payload.get("billingZip", "")).strip()
     billing_country = str(payload.get("billingCountry", "")).strip()
     terms_agreed = bool(payload.get("termsAgree", False))
+    account_email = str(g.current_account["email"] or "").strip().lower()
 
     length_error = validate_field_lengths(
         {
-            "email": email,
+            "email": email or account_email,
             "discord_username": discord_username,
             "discord_tag": tag_key,
             "billing_name": billing_name,
@@ -3913,12 +4080,12 @@ def purchase() -> tuple[Any, int]:
         }
     )
     if length_error:
-        log_security_event(None, "purchase", "validation_failed")
+        log_security_event(int(g.current_account["id"]), "purchase", "validation_failed")
         return jsonify({"ok": False, "message": length_error}), 400
 
-    if not email:
-        log_security_event(None, "purchase", "validation_failed")
-        return jsonify({"ok": False, "message": "Email and tier name are required."}), 400
+    if email and email != account_email:
+        log_security_event(int(g.current_account["id"]), "purchase", "email_mismatch")
+        return jsonify({"ok": False, "message": "Purchase email must match your logged-in account."}), 403
 
     if tier_number_raw in (None, ""):
         tier_number = None
@@ -3930,18 +4097,12 @@ def purchase() -> tuple[Any, int]:
             return jsonify({"ok": False, "message": "Tier must be a number from 1 to 6."}), 400
 
     with get_db() as conn:
-        user = fetch_account_by_id(conn, int(g.current_account["id"])) if g.current_account is not None else None
-        if user is None and email:
-            user = conn.execute(
-                "SELECT id, username, full_name, full_name_enc, email, discord_username, discord_username_enc, discord_tag, verified, preferred_currency_code FROM accounts WHERE email = ?",
-                (email,),
-            ).fetchone()
+        user = fetch_account_by_id(conn, int(g.current_account["id"]))
         if user is None:
             log_security_event(None, "purchase", "account_missing")
-            return jsonify({"ok": False, "message": "You must create an account before buying a tier."}), 403
+            return jsonify({"ok": False, "message": "Account session is invalid. Please log in again."}), 401
 
         ensure_community_profile(conn, int(user["id"]), str(user["username"] or "member"))
-        resolved_discord_username = discord_username or user["discord_username"]
         # If no Discord tag is present we apply standard pricing (Final tag = no discount).
         resolved_tag = tag_key or user["discord_tag"] or "final"
 
@@ -3991,17 +4152,17 @@ def purchase() -> tuple[Any, int]:
                     billing_method,
                     price,
                     signals_per_day,
-                    billing_name,
-                    billing_company or None,
-                    billing_address,
-                    billing_zip,
-                    billing_country,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
                     encrypt_value(billing_name),
                     encrypt_value(billing_company) if billing_company else None,
                     encrypt_value(billing_address),
                     encrypt_value(billing_zip),
                     encrypt_value(billing_country),
-                    resolved_discord_username,
+                    None,
                     resolved_tag,
                 ),
             )
@@ -4036,14 +4197,6 @@ def purchase() -> tuple[Any, int]:
                     "pending",
                 ),
             )
-            conn.execute(
-                "UPDATE account_balances SET total_invested = total_invested + ?, updated_at = CURRENT_TIMESTAMP WHERE account_id = ?",
-                (price, user["id"]),
-            )
-            conn.execute(
-                "INSERT INTO account_performance_snapshots (account_id, period_day, invested_amount, profit_amount) VALUES (?, ?, ?, 0)",
-                (user["id"], utc_now().strftime("%Y-%m-%d"), price),
-            )
             log_security_event(user["id"], "purchase", "success")
 
             currency_choice = resolve_currency_preference(user)
@@ -4073,7 +4226,7 @@ def purchase() -> tuple[Any, int]:
 
         conn.execute(
             "INSERT INTO purchases (account_id, tier_name, discord_username, discord_tag) VALUES (?, ?, ?, ?)",
-            (user["id"], tier_name, user["discord_username"], user["discord_tag"]),
+            (user["id"], tier_name, None, user["discord_tag"]),
         )
 
     log_security_event(user["id"], "purchase", "success")
@@ -4232,15 +4385,7 @@ def create_purchase() -> tuple[Any, int]:
                 (account_id, g.current_account["email"], format_db_timestamp(reminder_date))
             )
 
-        conn.execute(
-            "UPDATE account_balances SET total_invested = total_invested + ?, updated_at = CURRENT_TIMESTAMP WHERE account_id = ?",
-            (price_gbp, account_id),
-        )
-        conn.execute(
-            "INSERT INTO account_performance_snapshots (account_id, period_day, invested_amount, profit_amount) VALUES (?, ?, ?, 0)",
-            (account_id, utc_now().strftime("%Y-%m-%d"), price_gbp),
-        )
-    
+
     return jsonify({
         "ok": True,
         "message": f"Purchase created! You now have access to {signals_per_day} signal(s) per day.",
@@ -4298,6 +4443,7 @@ def member_dashboard() -> tuple[Any, int]:
     with get_db() as conn:
         loyalty = conn.execute("SELECT * FROM customer_loyalty WHERE account_id = ?", (account_id,)).fetchone()
         badges = build_badges_for_account(conn, account_id, include_preview=BADGE_PREVIEW_ENABLED)
+        last_signal_cashout = get_last_signal_cashout(conn, account_id)
         purchases = conn.execute(
             "SELECT id, tier_name, expires_at, created_at FROM purchases WHERE account_id = ? ORDER BY created_at DESC LIMIT 5",
             (account_id,)
@@ -4329,6 +4475,7 @@ def member_dashboard() -> tuple[Any, int]:
             "badges": badges,
             "customerSince": loyalty["customer_since"] if loyalty else None,
         },
+        "lastSignalCashout": last_signal_cashout,
         "recentPurchases": [
             {
                 "id": row["id"],
@@ -4375,6 +4522,7 @@ def community_summary() -> tuple[Any, int]:
         connection_counts = get_connection_counts(conn, account_id)
         display_name_policy = build_display_name_policy(profile)
         loyalty = get_loyalty_snapshot(conn, account_id)
+        last_signal_cashout = get_last_signal_cashout(conn, account_id)
 
     return jsonify(
         {
@@ -4408,8 +4556,113 @@ def community_summary() -> tuple[Any, int]:
             },
             "summary": performance,
             "badges": badges,
+            "lastSignalCashout": last_signal_cashout,
         }
     ), 200
+
+
+@app.post("/api/community/cashout")
+def community_record_cashout() -> tuple[Any, int]:
+    if g.current_account is None:
+        return jsonify({"ok": False, "message": "Login required."}), 401
+
+    payload = request.get_json(silent=True) or {}
+    raw_amount = payload.get("amount")
+    note = str(payload.get("note", "")).strip()
+    share_to_community = bool(payload.get("shareToCommunity", False))
+
+    try:
+        amount = float(raw_amount)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "message": "Enter a valid cashout amount."}), 400
+
+    if amount != amount or amount < -1_000_000_000 or amount > 1_000_000_000:
+        return jsonify({"ok": False, "message": "Cashout amount is out of range."}), 400
+    if len(note) > 160:
+        return jsonify({"ok": False, "message": "Cashout note is too long."}), 400
+
+    account_id = int(g.current_account["id"])
+    with get_db() as conn:
+        ensure_community_profile(conn, account_id, str(g.current_account["username"] or "member"))
+        conn.execute(
+            "INSERT INTO account_signal_cashouts (account_id, cashout_amount, note, shared_to_community) VALUES (?, ?, ?, 0)",
+            (account_id, amount, note or None),
+        )
+        cashout_row = conn.execute(
+            "SELECT id, cashout_amount, note, shared_to_community, created_at FROM account_signal_cashouts WHERE account_id = ? ORDER BY created_at DESC, id DESC LIMIT 1",
+            (account_id,),
+        ).fetchone()
+
+        if cashout_row is None:
+            return jsonify({"ok": False, "message": "Could not save cashout."}), 500
+
+        cashout_id = int(cashout_row["id"])
+        cashout = serialize_signal_cashout(cashout_row)
+        shared = False
+        if share_to_community and cashout is not None:
+            conn.execute(
+                "INSERT INTO chat_messages (sender_account_id, recipient_account_id, channel_type, message_body) VALUES (?, NULL, 'global', ?)",
+                (account_id, build_cashout_share_message(cashout)),
+            )
+            conn.execute(
+                "UPDATE account_signal_cashouts SET shared_to_community = 1 WHERE id = ?",
+                (cashout_id,),
+            )
+            cashout["sharedToCommunity"] = True
+            shared = True
+
+    response_message = "Cashout recorded."
+    if shared:
+        response_message = "Cashout recorded and shared to community."
+
+    return jsonify(
+        {
+            "ok": True,
+            "message": response_message,
+            "lastSignalCashout": cashout,
+            "sharedToCommunity": shared,
+            "shareError": None,
+        }
+    ), 201
+
+
+@app.post("/api/community/cashout/share")
+def community_share_cashout() -> tuple[Any, int]:
+    if g.current_account is None:
+        return jsonify({"ok": False, "message": "Login required."}), 401
+
+    account_id = int(g.current_account["id"])
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, cashout_amount, note, shared_to_community, created_at FROM account_signal_cashouts WHERE account_id = ? ORDER BY created_at DESC, id DESC LIMIT 1",
+            (account_id,),
+        ).fetchone()
+        if row is None:
+            return jsonify({"ok": False, "message": "No cashout recorded yet."}), 404
+
+        cashout_id = int(row["id"])
+        cashout = serialize_signal_cashout(row)
+        if cashout is None:
+            return jsonify({"ok": False, "message": "No cashout recorded yet."}), 404
+
+        conn.execute(
+            "INSERT INTO chat_messages (sender_account_id, recipient_account_id, channel_type, message_body) VALUES (?, NULL, 'global', ?)",
+            (account_id, build_cashout_share_message(cashout)),
+        )
+        conn.execute(
+            "UPDATE account_signal_cashouts SET shared_to_community = 1 WHERE id = ?",
+            (cashout_id,),
+        )
+
+        cashout["sharedToCommunity"] = True
+
+    return jsonify(
+        {
+            "ok": True,
+            "message": "Last signal cashout shared to community.",
+            "lastSignalCashout": cashout,
+        }
+    ), 201
 
 
 @app.patch("/api/community/settings")
