@@ -254,12 +254,12 @@ BITVAVO_ASSET_CATALOG: dict[str, dict[str, Any]] = {
 MARKET_CACHE_TTL_SECONDS = int(os.getenv("MARKET_CACHE_TTL_SECONDS", "30"))
 DEFAULT_CURRENCY_CODE = os.getenv("APP_DEFAULT_CURRENCY_CODE", "GBP").strip().upper() or "GBP"
 CHECKOUT_VAT_RATE = _float_env("APP_VAT_RATE", 0.21)
-EMAIL_FROM = os.getenv("EMAIL_FROM", "no-reply@vaultsignalsai.com").strip() or "no-reply@vaultsignalsai.com"
-SMTP_HOST = os.getenv("SMTP_HOST", os.getenv("SMTP_SERVER", "localhost")).strip() or "localhost"
-SMTP_PORT = int(os.getenv("SMTP_PORT", "1025"))
-SMTP_USERNAME = os.getenv("SMTP_USERNAME", os.getenv("SMTP_USER", "")).strip()
+EMAIL_FROM = os.getenv("EMAIL_FROM", "VaultSignalsAi@gmail.com").strip() or "VaultSignalsAi@gmail.com"
+SMTP_HOST = os.getenv("SMTP_HOST", os.getenv("SMTP_SERVER", "smtp.gmail.com")).strip() or "smtp.gmail.com"
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USERNAME = os.getenv("SMTP_USERNAME", os.getenv("SMTP_USER", "VaultSignalsAi@gmail.com")).strip()
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "").strip()
-SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "false").lower() in {"1", "true", "yes"}
+SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "true").lower() in {"1", "true", "yes"}
 RENEWAL_REMINDER_LEAD_DAYS = int(os.getenv("RENEWAL_REMINDER_LEAD_DAYS", "7"))
 ADMIN_DAILY_PASSWORD_ROTATION_ENABLED = os.getenv("ADMIN_DAILY_PASSWORD_ROTATION_ENABLED", "true").lower() in {"1", "true", "yes"}
 ADMIN_PASSWORD_ROTATION_INTERVAL_HOURS = max(1, int(os.getenv("ADMIN_PASSWORD_ROTATION_INTERVAL_HOURS", "24")))
@@ -288,7 +288,7 @@ SECURITY_CONSOLE_STEALTH_MODE = os.getenv("SECURITY_CONSOLE_STEALTH_MODE", "true
 SECURITY_CONSOLE_NO_CACHE = os.getenv("SECURITY_CONSOLE_NO_CACHE", "true").lower() in {"1", "true", "yes"}
 FEEDBACK_PHONE_NUMBER = os.getenv("FEEDBACK_PHONE_NUMBER", "+31625317922")
 FEEDBACK_PHONE_DISPLAY = os.getenv("FEEDBACK_PHONE_DISPLAY", "0625317922")
-FEEDBACK_CONTACT_EMAIL = os.getenv("FEEDBACK_CONTACT_EMAIL", "VaultSignals@AI.com")
+FEEDBACK_CONTACT_EMAIL = os.getenv("FEEDBACK_CONTACT_EMAIL", "VaultSignalsAi@gmail.com")
 FEEDBACK_EMAIL = os.getenv("FEEDBACK_EMAIL", FEEDBACK_CONTACT_EMAIL)
 FEEDBACK_EMAIL_FROM = os.getenv("FEEDBACK_EMAIL_FROM", EMAIL_FROM)
 REMEMBER_COOKIE_NAME = os.getenv("APP_REMEMBER_COOKIE_NAME", "vaultsignals_remember")
@@ -616,6 +616,25 @@ def build_admin_rotation_password(length: int = ADMIN_PASSWORD_LENGTH) -> str:
             return password
 
 
+def add_inline_logo_to_html_email(message: EmailMessage, logo_cid: str = "vaultsignals-logo") -> None:
+    logo_path = BASE_DIR / "static" / "vaultsignals-logo.png"
+    try:
+        logo_bytes = logo_path.read_bytes()
+        html_part = message.get_body(preferencelist=("html",))
+        if html_part is None:
+            return
+        html_part.add_related(
+            logo_bytes,
+            maintype="image",
+            subtype="png",
+            cid=f"<{logo_cid}>",
+            filename="vaultsignals-logo.png",
+            disposition="inline",
+        )
+    except OSError as exc:
+        logger.warning("Could not attach inline VaultSignals logo to email: %s", exc)
+
+
 def send_admin_password_rotation_email(email: str, username: str, rotated_password: str, rotated_at: datetime) -> bool:
     subject = "VaultSignalsAI admin password rotated"
     rotated_label = rotated_at.strftime("%Y-%m-%d %H:%M UTC")
@@ -629,12 +648,30 @@ def send_admin_password_rotation_email(email: str, username: str, rotated_passwo
         f"Login URL: {APP_BASE_URL}/\n\n"
         "VaultSignalsAI Security"
     )
+    html_body = f"""
+    <html>
+        <body style="font-family: Arial, sans-serif; color: #1c2430; line-height: 1.55;">
+            <p>Hello {username},</p>
+            <p>Your daily admin password rotation has completed successfully.</p>
+            <p><strong>Rotated at:</strong> {rotated_label}</p>
+            <p><strong>New admin password:</strong> {rotated_password}</p>
+            <p>For safety, this password was sent only to your admin email address. Please log in and store it securely.</p>
+            <p><a href="{APP_BASE_URL}/" style="background: #f2c14e; color: #111; padding: 10px 16px; border-radius: 6px; text-decoration: none; display: inline-block;">Open VaultSignalsAI</a></p>
+            <p style="margin-top: 16px; margin-bottom: 8px;">VaultSignalsAI Security</p>
+            <div style="margin-top: 14px;">
+                <img src="cid:vaultsignals-logo" alt="VaultSignalsAI logo" style="width: 140px; height: auto; display: block;" />
+            </div>
+        </body>
+    </html>
+    """
 
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = EMAIL_FROM
     msg["To"] = email
     msg.set_content(body)
+    msg.add_alternative(html_body, subtype="html")
+    add_inline_logo_to_html_email(msg)
     return send_smtp_message(msg)
 
 
