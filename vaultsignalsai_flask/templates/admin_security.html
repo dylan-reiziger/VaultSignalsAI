@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VaultSignals Security Console</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='vaultsignals-logo.png') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body
+    data-page-loader="intro"
+    data-vat-rate="{{ ui_config.vat_rate }}"
+    data-currency-symbol="{{ ui_config.currency_symbol }}"
+    data-default-currency-code="{{ ui_config.default_currency_code }}"
+    data-security-access="{{ '1' if access_granted else '0' }}"
+    data-security-auth-mode="{{ auth_mode }}"
+    data-security-panel-enabled="{{ '1' if security_panel_enabled else '0' }}"
+  >
+    {% include 'sections/page_loader.html' %}
+    <canvas id="marketCanvas"></canvas>
+    <div class="site-shell">
+      <div class="animated-bg">
+        <span class="glow glow-1"></span>
+        <span class="glow glow-2"></span>
+        <span class="glow glow-3"></span>
+        <div class="market-lines"></div>
+      </div>
+
+      <header class="navbar">
+        <div class="brand">
+          <div class="logo" aria-label="Vault Signals logo">
+            <img class="logo-img" src="{{ url_for('static', filename='vaultsignals-logo.png') }}" alt="Vault Signals logo" />
+          </div>
+          <div>
+            <p class="eyebrow">Database Security</p>
+            <h2 class="brand-title">VaultSignals</h2>
+          </div>
+        </div>
+
+        <nav class="nav-links" id="navLinks">
+          <a href="/">Home</a>
+          <a href="/your-signals">Your Signals</a>
+          <a href="/admin/signals">Admin Signals</a>
+          <a href="/admin/security">Admin Security</a>
+        </nav>
+
+        <div class="nav-actions">
+          <a class="bitvavo-btn" href="{{ ui_config.bitvavo_url }}" target="_blank" rel="noreferrer">Bitvavo</a>
+          <button class="menu-btn" id="menuToggle" aria-label="Open menu">☰</button>
+        </div>
+      </header>
+
+      <main>
+        {% if not access_granted %}
+        <section class="section visible">
+          <article class="panel-card">
+            <h2>Security Console Access</h2>
+            {% if security_panel_enabled %}
+            <p>Use the temporary security console credential to open account and database audit records.</p>
+            <form id="securityPanelLoginForm" class="security-auth-grid">
+              <label>Username<input id="securityPanelUsername" type="text" autocomplete="username" required /></label>
+              <label>Password<input id="securityPanelPassword" type="password" autocomplete="current-password" required /></label>
+              <div class="admin-actions-row">
+                <button class="primary-btn" type="submit">Open Security Console</button>
+              </div>
+            </form>
+            <div id="securityPanelLoginMessage" class="message-box">Only approved owners and temporary security-panel login can access this console.</div>
+            {% else %}
+            <p>The security panel login flow is disabled. Use an approved owner admin account to continue.</p>
+            <div id="securityPanelLoginMessage" class="message-box">Security panel disabled by configuration.</div>
+            {% endif %}
+          </article>
+        </section>
+        {% else %}
+        <section class="section visible">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Security Ops</p>
+              <h2>Database and account security console</h2>
+              <p class="section-copy">Live view of account inventory, security events, active sessions, and key database table sizes.</p>
+            </div>
+          </div>
+
+          <article class="panel-card">
+            <div class="admin-actions-row">
+              <button id="securityRefreshBtn" class="primary-btn" type="button">Refresh Records</button>
+              <button id="securityLogoutBtn" class="ghost-btn" type="button">Logout Console</button>
+            </div>
+            <div id="securityConsoleMessage" class="message-box">Fetching latest security records...</div>
+            <div id="securityOverviewGrid" class="security-overview-grid" aria-live="polite"></div>
+          </article>
+        </section>
+
+        <section class="section visible">
+          <article class="panel-card security-table-panel">
+            <h3>Accounts</h3>
+            <p class="security-table-caption">Recent accounts with current privilege and token status.</p>
+            <div id="securityAccountsTable" class="admin-signals-table"></div>
+          </article>
+        </section>
+
+        <section class="section visible">
+          <article class="panel-card security-table-panel">
+            <h3>Security events</h3>
+            <p class="security-table-caption">Most recent login, access, and protection events from the audit trail.</p>
+            <div id="securityEventsTable" class="admin-signals-table"></div>
+          </article>
+        </section>
+
+        <section class="section visible">
+          <article class="panel-card security-table-panel">
+            <h3>Database table overview</h3>
+            <p class="security-table-caption">Row counts for critical tables and owner access allowlist review.</p>
+            <div id="securityTablesTable" class="admin-signals-table"></div>
+            <div id="securityAllowedEmails" class="message-box"></div>
+          </article>
+        </section>
+        {% endif %}
+        {% include 'sections/copyright_bar.html' %}
+      </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='page_loader.js') }}"></script>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <script src="{{ url_for('static', filename='admin_security.js') }}"></script>
+  </body>
+</html>

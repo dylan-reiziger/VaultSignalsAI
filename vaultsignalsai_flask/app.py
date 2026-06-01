@@ -5,11 +5,13 @@ import sqlite3
 import json
 import time
 import uuid
+import threading
 import re
 import smtplib
 import os
 import base64
 import hashlib
+import ipaddress
 import secrets
 from email.message import EmailMessage
 import requests
@@ -44,13 +46,16 @@ AUTH_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("AUTH_RATE_LIMIT_WINDOW_SECONDS",
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "5"))
 REQUEST_RETRIES = int(os.getenv("REQUEST_RETRIES", "2"))
 ENCRYPTION_KEY = os.getenv("APP_DATA_ENCRYPTION_KEY", "")
-TOKEN_PEPPER = os.getenv("TOKEN_PEPPER", "change-this-token-pepper")
+TOKEN_PEPPER_RAW = os.getenv("TOKEN_PEPPER", "").strip()
+TOKEN_PEPPER = TOKEN_PEPPER_RAW or hashlib.sha256(str(BASE_DIR).encode("utf-8")).hexdigest()
 APP_SECRET_KEY = os.getenv("APP_SECRET_KEY", TOKEN_PEPPER)
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://127.0.0.1:5000").rstrip("/")
-APP_ENV = os.getenv("APP_ENV", os.getenv("FLASK_ENV", "development")).strip().lower()
+DEFAULT_APP_ENV = "development" if os.getenv("FLASK_RUN_HOST", "127.0.0.1").strip().lower() in {"127.0.0.1", "localhost"} else "production"
+APP_ENV = os.getenv("APP_ENV", os.getenv("FLASK_ENV", DEFAULT_APP_ENV)).strip().lower()
 IS_DEV_ENV = APP_ENV in {"dev", "development", "local"} or os.getenv("FLASK_DEBUG", "false").lower() in {"1", "true", "yes"}
 BADGE_PREVIEW_ENABLED = os.getenv("BADGE_PREVIEW_ENABLED", "true" if IS_DEV_ENV else "false").lower() in {"1", "true", "yes"}
 TRUST_PROXY_COUNT = int(os.getenv("TRUST_PROXY_COUNT", "0" if IS_DEV_ENV else "1"))
+TRUSTED_PROXY_IPS = {item.strip() for item in os.getenv("TRUSTED_PROXY_IPS", "").split(",") if item.strip()}
 REDACTED_REQUIRED_FIELD_VALUE = "[encrypted]"
 
 PAYPAL_API_BASE_URL = os.getenv("PAYPAL_API_BASE_URL", "https://api-m.sandbox.paypal.com").rstrip("/")
@@ -88,7 +93,7 @@ def validate_security_configuration() -> None:
     if IS_DEV_ENV:
         return
 
-    if TOKEN_PEPPER == "change-this-token-pepper":
+    if not TOKEN_PEPPER_RAW:
         raise RuntimeError("TOKEN_PEPPER must be set in non-development environments.")
     if not APP_SECRET_KEY or APP_SECRET_KEY == TOKEN_PEPPER:
         raise RuntimeError("APP_SECRET_KEY must be explicitly set and differ from TOKEN_PEPPER in non-development environments.")
@@ -98,6 +103,48 @@ def validate_security_configuration() -> None:
         raise RuntimeError("APP_DATA_ENCRYPTION_KEY is invalid. Provide a valid Fernet key in non-development environments.")
     if not bool(app.config.get("SESSION_COOKIE_SECURE")):
         raise RuntimeError("SESSION_COOKIE_SECURE must be enabled in non-development environments.")
+    if AUTO_ADMIN_EMAILS:
+        raise RuntimeError("AUTO_ADMIN_EMAILS must be empty in non-development environments.")
+    if not DATABASE_ACCESS_ALLOWED_EMAILS:
+        raise RuntimeError("DATABASE_ACCESS_ALLOWED_EMAILS must list approved owner/admin emails in non-development environments.")
+    if SECURITY_PANEL_ENABLED:
+        valid_weekdays = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"}
+        if not SECURITY_PANEL_ADMIN_USERNAME:
+            raise RuntimeError("SECURITY_PANEL_ADMIN_USERNAME must be set when SECURITY_PANEL_ENABLED is true.")
+        if not SECURITY_PANEL_ADMIN_PASSWORD_HASH:
+            raise RuntimeError("SECURITY_PANEL_ADMIN_PASSWORD_HASH must be set when SECURITY_PANEL_ENABLED is true.")
+        if SECURITY_PANEL_WEEKLY_ROTATION_WEEKDAY not in valid_weekdays:
+            raise RuntimeError("SECURITY_PANEL_WEEKLY_ROTATION_WEEKDAY must be a valid weekday name.")
+        if SECURITY_PANEL_PASSWORD_FREEZE_UNTIL_UTC:
+            cutoff_valid = False
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+                try:
+                    datetime.strptime(SECURITY_PANEL_PASSWORD_FREEZE_UNTIL_UTC, fmt)
+                    cutoff_valid = True
+                    break
+                except ValueError:
+                    continue
+            if not cutoff_valid:
+                try:
+                    datetime.fromisoformat(SECURITY_PANEL_PASSWORD_FREEZE_UNTIL_UTC)
+                    cutoff_valid = True
+                except ValueError:
+                    cutoff_valid = False
+            if not cutoff_valid:
+                raise RuntimeError("SECURITY_PANEL_PASSWORD_FREEZE_UNTIL_UTC must be a valid datetime.")
+        if SECURITY_PANEL_WEEKLY_ROTATION_ENABLED and not SECURITY_PANEL_WEEKLY_ROTATION_SECRET:
+            raise RuntimeError("SECURITY_PANEL_WEEKLY_ROTATION_SECRET must be set when weekly security panel rotation is enabled.")
+        if not SECURITY_PANEL_WEEKLY_ROTATION_ENABLED and not SECURITY_PANEL_ADMIN_PASSWORD_HASH_AFTER_FREEZE:
+            raise RuntimeError("SECURITY_PANEL_ADMIN_PASSWORD_HASH_AFTER_FREEZE must be set when weekly rotation is disabled.")
+        try:
+            check_password_hash(SECURITY_PANEL_ADMIN_PASSWORD_HASH, "validation-probe")
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("SECURITY_PANEL_ADMIN_PASSWORD_HASH is not a valid password hash.") from exc
+        if not SECURITY_PANEL_WEEKLY_ROTATION_ENABLED:
+            try:
+                check_password_hash(SECURITY_PANEL_ADMIN_PASSWORD_HASH_AFTER_FREEZE, "validation-probe")
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError("SECURITY_PANEL_ADMIN_PASSWORD_HASH_AFTER_FREEZE is not a valid password hash.") from exc
 
 
 def _csv_env(env_name: str, default_csv: str) -> list[str]:
@@ -214,6 +261,31 @@ SMTP_USERNAME = os.getenv("SMTP_USERNAME", os.getenv("SMTP_USER", "")).strip()
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "").strip()
 SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "false").lower() in {"1", "true", "yes"}
 RENEWAL_REMINDER_LEAD_DAYS = int(os.getenv("RENEWAL_REMINDER_LEAD_DAYS", "7"))
+ADMIN_DAILY_PASSWORD_ROTATION_ENABLED = os.getenv("ADMIN_DAILY_PASSWORD_ROTATION_ENABLED", "true").lower() in {"1", "true", "yes"}
+ADMIN_PASSWORD_ROTATION_INTERVAL_HOURS = max(1, int(os.getenv("ADMIN_PASSWORD_ROTATION_INTERVAL_HOURS", "24")))
+ADMIN_PASSWORD_ROTATION_CHECK_INTERVAL_SECONDS = max(30, int(os.getenv("ADMIN_PASSWORD_ROTATION_CHECK_INTERVAL_SECONDS", "300")))
+ADMIN_PASSWORD_LENGTH = max(16, min(64, int(os.getenv("ADMIN_PASSWORD_LENGTH", "24"))))
+SECURITY_PANEL_ENABLED = os.getenv("SECURITY_PANEL_ENABLED", "true").lower() in {"1", "true", "yes"}
+SECURITY_PANEL_ADMIN_USERNAME = os.getenv("SECURITY_PANEL_ADMIN_USERNAME", "admin").strip() or "admin"
+DEFAULT_SECURITY_PANEL_ADMIN_PASSWORD_HASH = "scrypt:32768:8:1$TZAXch294zCAkaZ6$d1b583278ad298584715bd2128cc3838147597f656575e3c887c04bd3b49ce6395bd64e6c2dad521c919a10b35c20dc0cfa3cc28f2b3309bd252325d9c8a672c"
+SECURITY_PANEL_ADMIN_PASSWORD_HASH = os.getenv(
+    "SECURITY_PANEL_ADMIN_PASSWORD_HASH",
+    DEFAULT_SECURITY_PANEL_ADMIN_PASSWORD_HASH,
+).strip() or DEFAULT_SECURITY_PANEL_ADMIN_PASSWORD_HASH
+SECURITY_PANEL_PASSWORD_FREEZE_UNTIL_UTC = os.getenv("SECURITY_PANEL_PASSWORD_FREEZE_UNTIL_UTC", "2026-06-01 23:59:59").strip() or "2026-06-01 23:59:59"
+SECURITY_PANEL_WEEKLY_ROTATION_ENABLED = os.getenv("SECURITY_PANEL_WEEKLY_ROTATION_ENABLED", "true").lower() in {"1", "true", "yes"}
+SECURITY_PANEL_WEEKLY_ROTATION_WEEKDAY = os.getenv("SECURITY_PANEL_WEEKLY_ROTATION_WEEKDAY", "monday").strip().lower() or "monday"
+SECURITY_PANEL_WEEKLY_ROTATION_SECRET = os.getenv("SECURITY_PANEL_WEEKLY_ROTATION_SECRET", TOKEN_PEPPER).strip() or TOKEN_PEPPER
+SECURITY_PANEL_WEEKLY_PASSWORD_LENGTH = max(16, min(64, int(os.getenv("SECURITY_PANEL_WEEKLY_PASSWORD_LENGTH", "24"))))
+DEFAULT_SECURITY_PANEL_ADMIN_PASSWORD_HASH_AFTER_FREEZE = "scrypt:32768:8:1$j5BLGwAYEyxB3Ao2$f47274ee12a214ed53bbc415b1d10166dacbf5d1d9eac94783aa4918e287980100e8df55b27efdf9090e90caed1dbae4daaf15dec7b7f657a3e9ad890d880ad0"
+SECURITY_PANEL_ADMIN_PASSWORD_HASH_AFTER_FREEZE = os.getenv(
+    "SECURITY_PANEL_ADMIN_PASSWORD_HASH_AFTER_FREEZE",
+    DEFAULT_SECURITY_PANEL_ADMIN_PASSWORD_HASH_AFTER_FREEZE,
+).strip() or DEFAULT_SECURITY_PANEL_ADMIN_PASSWORD_HASH_AFTER_FREEZE
+SECURITY_PANEL_SESSION_KEY = "security_panel_authenticated"
+SECURITY_PANEL_SESSION_USERNAME_KEY = "security_panel_username"
+SECURITY_CONSOLE_STEALTH_MODE = os.getenv("SECURITY_CONSOLE_STEALTH_MODE", "true").lower() in {"1", "true", "yes"}
+SECURITY_CONSOLE_NO_CACHE = os.getenv("SECURITY_CONSOLE_NO_CACHE", "true").lower() in {"1", "true", "yes"}
 FEEDBACK_PHONE_NUMBER = os.getenv("FEEDBACK_PHONE_NUMBER", "+31625317922")
 FEEDBACK_PHONE_DISPLAY = os.getenv("FEEDBACK_PHONE_DISPLAY", "0625317922")
 FEEDBACK_CONTACT_EMAIL = os.getenv("FEEDBACK_CONTACT_EMAIL", "VaultSignals@AI.com")
@@ -252,12 +324,15 @@ STOCK_SIGNAL_CACHE_TTL_SECONDS = int(os.getenv("STOCK_SIGNAL_CACHE_TTL_SECONDS",
 YAHOO_FINANCE_CHART_BASE_URL = os.getenv("YAHOO_FINANCE_CHART_BASE_URL", "https://query1.finance.yahoo.com/v8/finance/chart").rstrip("/")
 YAHOO_FINANCE_USER_AGENT = os.getenv("YAHOO_FINANCE_USER_AGENT", "Mozilla/5.0")
 ALLOWED_CORS_ORIGINS = set(_csv_env("ALLOWED_CORS_ORIGINS", ""))
-ADMIN_USERNAMES = {username.lower() for username in _csv_env("ADMIN_USERNAMES", "admin")}
-AUTO_ADMIN_EMAILS = {email.strip().lower() for email in _csv_env("AUTO_ADMIN_EMAILS", "dylan.reiziger@hotmail.com") if email.strip()}
+ADMIN_USERNAMES = {username.lower() for username in _csv_env("ADMIN_USERNAMES", "")}
+AUTO_ADMIN_EMAILS = {email.strip().lower() for email in _csv_env("AUTO_ADMIN_EMAILS", "") if email.strip()}
+DATABASE_ACCESS_ALLOWED_EMAILS = {email.strip().lower() for email in _csv_env("DATABASE_ACCESS_ALLOWED_EMAILS", "") if email.strip()}
 _MARKET_CACHE: dict[str, Any] = {"payload": None, "updated_at": 0.0}
 _LIVE_DESK_CACHE: dict[str, dict[str, Any]] = {}
 _STOCK_SIGNAL_CACHE: dict[str, dict[str, Any]] = {}
 _FX_CACHE: dict[str, Any] = {"payload": None, "updated_at": 0.0}
+_ADMIN_PASSWORD_ROTATION_LOCK = threading.Lock()
+_ADMIN_PASSWORD_LAST_CHECK_TS = 0.0
 MAX_LENGTHS = {
     "username": 50,
     "full_name": 120,
@@ -290,6 +365,9 @@ BILLING_CYCLE_DAYS = {
     "quarterly": int(os.getenv("BILLING_CYCLE_DAYS_QUARTERLY", "90")),
     "annual": int(os.getenv("BILLING_CYCLE_DAYS_ANNUAL", "365")),
 }
+PURCHASE_STATUS_PENDING = "pending"
+PURCHASE_STATUS_COMPLETED = "completed"
+PURCHASE_STATUS_FAILED = "failed"
 COMMUNITY_RANK_NAMES = _csv_env("COMMUNITY_RANK_NAMES", "Starter,Trader,Pro,Expert,Elite,Vault Elite")
 COMMUNITY_RANK_BY_TIER = {
     0: "",
@@ -522,6 +600,44 @@ def send_smtp_message(message: EmailMessage) -> bool:
         return False
 
 
+def build_admin_rotation_password(length: int = ADMIN_PASSWORD_LENGTH) -> str:
+    resolved_length = max(16, min(64, int(length)))
+    symbols = "!@#$%^&*()-_=+[]{}"
+    alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" + symbols
+
+    while True:
+        password = "".join(secrets.choice(alphabet) for _ in range(resolved_length))
+        if (
+            any(char.islower() for char in password)
+            and any(char.isupper() for char in password)
+            and any(char.isdigit() for char in password)
+            and any(char in symbols for char in password)
+        ):
+            return password
+
+
+def send_admin_password_rotation_email(email: str, username: str, rotated_password: str, rotated_at: datetime) -> bool:
+    subject = "VaultSignalsAI admin password rotated"
+    rotated_label = rotated_at.strftime("%Y-%m-%d %H:%M UTC")
+    body = (
+        f"Hello {username},\n\n"
+        "Your daily admin password rotation has completed successfully.\n"
+        f"Rotated at: {rotated_label}\n"
+        f"New admin password: {rotated_password}\n\n"
+        "For safety, this password was sent only to your admin email address. "
+        "Please log in and store it securely.\n\n"
+        f"Login URL: {APP_BASE_URL}/\n\n"
+        "VaultSignalsAI Security"
+    )
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = EMAIL_FROM
+    msg["To"] = email
+    msg.set_content(body)
+    return send_smtp_message(msg)
+
+
 def build_exchange_rate_url() -> str:
     return f"{EXCHANGE_RATE_BASE_URL.rstrip('/')}/latest"
 
@@ -671,14 +787,13 @@ def is_admin_username(username: str | None) -> bool:
     return candidate in ADMIN_USERNAMES
 
 
-def is_auto_admin_email(email: str | None) -> bool:
-    candidate = (email or "").strip().lower()
-    if not candidate:
-        return False
-    return candidate in AUTO_ADMIN_EMAILS
+def _account_email(account: sqlite3.Row | None) -> str:
+    if account is None or "email" not in account.keys():
+        return ""
+    return str(account["email"] or "").strip().lower()
 
 
-def is_admin_account(account: sqlite3.Row | None) -> bool:
+def has_admin_role(account: sqlite3.Row | None) -> bool:
     if account is None:
         return False
     if "is_admin" in account.keys():
@@ -686,12 +801,276 @@ def is_admin_account(account: sqlite3.Row | None) -> bool:
     return is_admin_username(account["username"] if "username" in account.keys() else None)
 
 
+def is_database_access_email(email: str | None) -> bool:
+    candidate = str(email or "").strip().lower()
+    if not candidate:
+        return False
+    return candidate in DATABASE_ACCESS_ALLOWED_EMAILS
+
+
+def is_admin_account(account: sqlite3.Row | None) -> bool:
+    if not has_admin_role(account):
+        return False
+    return is_database_access_email(_account_email(account))
+
+
 def require_admin_api() -> tuple[sqlite3.Row | None, tuple[Any, int] | None]:
     if g.current_account is None:
         return None, (jsonify({"ok": False, "message": "Login required."}), 401)
     if not is_admin_account(g.current_account):
+        if has_admin_role(g.current_account):
+            log_security_event(int(g.current_account["id"]), "database_access", "blocked_email_allowlist")
+            return None, (jsonify({"ok": False, "message": "Database access is restricted to approved owner accounts."}), 403)
         return None, (jsonify({"ok": False, "message": "Admin access required."}), 403)
     return g.current_account, None
+
+
+def is_security_panel_session_authenticated() -> bool:
+    if not SECURITY_PANEL_ENABLED:
+        return False
+    if not bool(session.get(SECURITY_PANEL_SESSION_KEY)):
+        return False
+    return str(session.get(SECURITY_PANEL_SESSION_USERNAME_KEY, "")).strip().lower() == SECURITY_PANEL_ADMIN_USERNAME.strip().lower()
+
+
+def has_security_console_access() -> bool:
+    if g.current_account is not None and is_admin_account(g.current_account):
+        return True
+    return is_security_panel_session_authenticated()
+
+
+def resolve_security_console_auth_mode() -> str:
+    if g.current_account is not None and is_admin_account(g.current_account):
+        return "account"
+    if is_security_panel_session_authenticated():
+        return "security_panel"
+    return "none"
+
+
+def resolve_security_panel_rotation_weekday_index() -> int:
+    weekday_map = {
+        "monday": 0,
+        "tuesday": 1,
+        "wednesday": 2,
+        "thursday": 3,
+        "friday": 4,
+        "saturday": 5,
+        "sunday": 6,
+    }
+    return weekday_map.get(SECURITY_PANEL_WEEKLY_ROTATION_WEEKDAY, 0)
+
+
+def parse_security_panel_freeze_cutoff() -> datetime | None:
+    return parse_db_timestamp(SECURITY_PANEL_PASSWORD_FREEZE_UNTIL_UTC)
+
+
+def resolve_security_panel_rotation_anchor(reference_dt: datetime) -> datetime:
+    target_weekday = resolve_security_panel_rotation_weekday_index()
+    days_since_rotation_day = (reference_dt.weekday() - target_weekday) % 7
+    return (reference_dt - timedelta(days=days_since_rotation_day)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def build_security_panel_weekly_password(reference_dt: datetime | None = None) -> str:
+    now_dt = reference_dt or utc_now()
+    anchor_dt = resolve_security_panel_rotation_anchor(now_dt)
+    lower = "abcdefghijklmnopqrstuvwxyz"
+    upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    digits = "0123456789"
+    symbols = "!@#$%^&*()-_=+[]{}"
+    alphabet = lower + upper + digits + symbols
+
+    seed_prefix = (
+        f"vaultsignals-security-panel|{SECURITY_PANEL_ADMIN_USERNAME.strip().lower()}"
+        f"|{anchor_dt.strftime('%Y-%m-%d')}|{SECURITY_PANEL_WEEKLY_ROTATION_WEEKDAY}"
+    )
+    stream = bytearray()
+    counter = 0
+    while len(stream) < (SECURITY_PANEL_WEEKLY_PASSWORD_LENGTH + 16):
+        block = hashlib.sha256(f"{SECURITY_PANEL_WEEKLY_ROTATION_SECRET}|{seed_prefix}|{counter}".encode("utf-8")).digest()
+        stream.extend(block)
+        counter += 1
+
+    chars = [
+        lower[stream[0] % len(lower)],
+        upper[stream[1] % len(upper)],
+        digits[stream[2] % len(digits)],
+        symbols[stream[3] % len(symbols)],
+    ]
+    for idx in range(max(0, SECURITY_PANEL_WEEKLY_PASSWORD_LENGTH - 4)):
+        chars.append(alphabet[stream[idx + 4] % len(alphabet)])
+
+    for idx in range(len(chars) - 1, 0, -1):
+        swap_idx = stream[(idx + 7) % len(stream)] % (idx + 1)
+        chars[idx], chars[swap_idx] = chars[swap_idx], chars[idx]
+
+    return "".join(chars)
+
+
+def verify_security_panel_password(password: str) -> bool:
+    now_dt = utc_now()
+    freeze_cutoff = parse_security_panel_freeze_cutoff()
+    if freeze_cutoff is not None and now_dt <= freeze_cutoff:
+        try:
+            return check_password_hash(SECURITY_PANEL_ADMIN_PASSWORD_HASH, password)
+        except (TypeError, ValueError):
+            return False
+
+    if SECURITY_PANEL_WEEKLY_ROTATION_ENABLED:
+        expected_password = build_security_panel_weekly_password(now_dt)
+        return secrets.compare_digest(expected_password, password)
+
+    try:
+        return check_password_hash(SECURITY_PANEL_ADMIN_PASSWORD_HASH_AFTER_FREEZE, password)
+    except (TypeError, ValueError):
+        return False
+
+
+def security_console_denied_response(status_code: int, message: str) -> tuple[Any, int]:
+    if SECURITY_CONSOLE_STEALTH_MODE and status_code in {401, 403, 404}:
+        return jsonify({"ok": False, "message": "Not found."}), 404
+    return jsonify({"ok": False, "message": message}), status_code
+
+
+def require_security_console_api() -> tuple[dict[str, Any] | None, tuple[Any, int] | None]:
+    if g.current_account is not None:
+        if is_admin_account(g.current_account):
+            return {"mode": "account", "username": str(g.current_account["username"] or "")}, None
+        if has_admin_role(g.current_account):
+            log_security_event(int(g.current_account["id"]), "database_access", "blocked_email_allowlist")
+            return None, security_console_denied_response(403, "Database access is restricted to approved owner accounts.")
+
+    if is_security_panel_session_authenticated():
+        return {"mode": "security_panel", "username": SECURITY_PANEL_ADMIN_USERNAME}, None
+
+    return None, security_console_denied_response(401, "Security console login required.")
+
+
+def rotate_admin_passwords_if_due(force: bool = False) -> dict[str, Any]:
+    now_dt = utc_now()
+    rotation_cutoff = now_dt - timedelta(hours=ADMIN_PASSWORD_ROTATION_INTERVAL_HOURS)
+    request_ip_hash = hash_ip(_client_key())
+    request_user_agent = (request.headers.get("User-Agent", "") or "")[:255]
+    summary: dict[str, Any] = {
+        "checked": 0,
+        "rotated": 0,
+        "failed": 0,
+        "skipped": 0,
+        "rotatedAccounts": [],
+    }
+
+    with get_db() as conn:
+        admin_accounts = conn.execute(
+            "SELECT id, username, email FROM accounts WHERE is_admin = 1 ORDER BY id ASC"
+        ).fetchall()
+        summary["checked"] = len(admin_accounts)
+
+        for admin in admin_accounts:
+            account_id = int(admin["id"])
+            username = str(admin["username"] or "admin")
+            email = str(admin["email"] or "").strip().lower()
+
+            if not is_database_access_email(email):
+                summary["skipped"] += 1
+                insert_security_event(
+                    conn,
+                    account_id,
+                    "admin_password_rotation",
+                    "skip_not_allowlisted",
+                    ip_hash=request_ip_hash,
+                    user_agent=request_user_agent,
+                )
+                continue
+
+            if not email:
+                summary["skipped"] += 1
+                insert_security_event(
+                    conn,
+                    account_id,
+                    "admin_password_rotation",
+                    "missing_email",
+                    ip_hash=request_ip_hash,
+                    user_agent=request_user_agent,
+                )
+                continue
+
+            if not force:
+                last_success = conn.execute(
+                    """
+                    SELECT created_at
+                    FROM account_security_events
+                    WHERE account_id = ? AND event_type = 'admin_password_rotation' AND event_status = 'success'
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (account_id,),
+                ).fetchone()
+                last_success_at = parse_db_timestamp(last_success["created_at"]) if last_success else None
+                if last_success_at is not None and last_success_at >= rotation_cutoff:
+                    summary["skipped"] += 1
+                    continue
+
+            try:
+                next_password = build_admin_rotation_password()
+                if not send_admin_password_rotation_email(email, username, next_password, now_dt):
+                    summary["failed"] += 1
+                    insert_security_event(
+                        conn,
+                        account_id,
+                        "admin_password_rotation",
+                        "email_failed",
+                        ip_hash=request_ip_hash,
+                        user_agent=request_user_agent,
+                    )
+                    continue
+
+                conn.execute(
+                    "UPDATE accounts SET password_hash = ? WHERE id = ?",
+                    (generate_password_hash(next_password), account_id),
+                )
+                conn.execute("DELETE FROM auth_tokens WHERE account_id = ?", (account_id,))
+                insert_security_event(
+                    conn,
+                    account_id,
+                    "admin_password_rotation",
+                    "success",
+                    ip_hash=request_ip_hash,
+                    user_agent=request_user_agent,
+                )
+                summary["rotated"] += 1
+                summary["rotatedAccounts"].append(username)
+            except Exception as exc:
+                summary["failed"] += 1
+                logger.warning("Failed to rotate admin password for account %s: %s", account_id, exc)
+                insert_security_event(
+                    conn,
+                    account_id,
+                    "admin_password_rotation",
+                    "error",
+                    ip_hash=request_ip_hash,
+                    user_agent=request_user_agent,
+                )
+
+    return summary
+
+
+def maybe_run_admin_password_rotation(force: bool = False) -> dict[str, Any]:
+    global _ADMIN_PASSWORD_LAST_CHECK_TS
+
+    if not ADMIN_DAILY_PASSWORD_ROTATION_ENABLED and not force:
+        return {"checked": 0, "rotated": 0, "failed": 0, "skipped": 0, "disabled": True}
+
+    now_ts = time.time()
+    if not force and (now_ts - _ADMIN_PASSWORD_LAST_CHECK_TS) < ADMIN_PASSWORD_ROTATION_CHECK_INTERVAL_SECONDS:
+        return {"checked": 0, "rotated": 0, "failed": 0, "skipped": 0, "throttled": True}
+
+    if not _ADMIN_PASSWORD_ROTATION_LOCK.acquire(blocking=False):
+        return {"checked": 0, "rotated": 0, "failed": 0, "skipped": 0, "busy": True}
+
+    try:
+        _ADMIN_PASSWORD_LAST_CHECK_TS = now_ts
+        return rotate_admin_passwords_if_due(force=force)
+    finally:
+        _ADMIN_PASSWORD_ROTATION_LOCK.release()
 
 
 def fetch_account_by_id(conn: sqlite3.Connection, account_id: int) -> sqlite3.Row | None:
@@ -1027,6 +1406,14 @@ def get_price_for_selection(tier: int, tag_key: str, billing_cycle: str) -> floa
     return PRICING_MATRIX_GBP[tier][tag_key][billing_cycle]
 
 
+def resolve_purchase_expiry(billing_cycle: str, *, now: datetime | None = None) -> datetime | None:
+    cycle = str(billing_cycle or "").strip().lower()
+    if cycle == "lifetime":
+        return None
+    days = BILLING_CYCLE_DAYS.get(cycle, BILLING_CYCLE_DAYS.get(DEFAULT_BILLING_CYCLE, 30))
+    return (now or utc_now()) + timedelta(days=days)
+
+
 def get_payment_forward_url(method: str) -> str:
     method_key = (method or "").strip().lower()
     return PAYMENT_LINKS.get(method_key, PAYMENT_LINKS["creditcard"])
@@ -1053,8 +1440,14 @@ def ensure_community_profile(conn: sqlite3.Connection, account_id: int, username
 
 def get_active_tier_number(conn: sqlite3.Connection, account_id: int) -> int:
     row = conn.execute(
-        "SELECT MAX(COALESCE(tier_number, 0)) AS tier_max FROM purchases WHERE account_id = ? AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)",
-        (account_id,),
+                """
+                SELECT MAX(COALESCE(tier_number, 0)) AS tier_max
+                FROM purchases
+                WHERE account_id = ?
+                    AND payment_status = ?
+                    AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+                """,
+                (account_id, PURCHASE_STATUS_COMPLETED),
     ).fetchone()
     return int((row["tier_max"] if row else 0) or 0)
 
@@ -2149,11 +2542,41 @@ def build_market_summary(global_data: dict[str, Any] | None, crypto_rows: list[d
     }
 
 
+def _remote_addr_is_trusted_proxy(remote_addr: str | None) -> bool:
+    if not remote_addr:
+        return False
+
+    candidate = remote_addr.strip()
+    if candidate.startswith("::ffff:"):
+        candidate = candidate[7:]
+    if candidate in {"127.0.0.1", "::1"}:
+        return True
+    if not TRUSTED_PROXY_IPS:
+        return False
+
+    try:
+        remote_ip = ipaddress.ip_address(candidate)
+    except ValueError:
+        return False
+
+    for trusted_ip in TRUSTED_PROXY_IPS:
+        try:
+            if "/" in trusted_ip:
+                if remote_ip in ipaddress.ip_network(trusted_ip, strict=False):
+                    return True
+            elif remote_ip == ipaddress.ip_address(trusted_ip):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
 def _client_key() -> str:
-    if TRUST_PROXY_COUNT > 0:
-        forwarded_for = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-        if forwarded_for:
-            return forwarded_for
+    if TRUST_PROXY_COUNT > 0 and _remote_addr_is_trusted_proxy(request.remote_addr):
+        for forwarded_ip in request.headers.get("X-Forwarded-For", "").split(","):
+            candidate = forwarded_ip.strip()
+            if candidate:
+                return candidate
     return request.remote_addr or "unknown"
 
 
@@ -2165,22 +2588,37 @@ def hash_rate_limit_key(client_key: str) -> str:
     return hashlib.sha256(f"rate_limit:{TOKEN_PEPPER}:{client_key}".encode("utf-8")).hexdigest()
 
 
+def insert_security_event(
+    conn: sqlite3.Connection,
+    account_id: int | None,
+    event_type: str,
+    event_status: str,
+    *,
+    ip_hash: str | None,
+    user_agent: str | None,
+) -> None:
+    conn.execute(
+        "INSERT INTO account_security_events (account_id, event_type, event_status, ip_hash, user_agent) VALUES (?, ?, ?, ?, ?)",
+        (account_id, event_type, event_status, ip_hash, user_agent),
+    )
+
+
 def log_security_event(account_id: int | None, event_type: str, event_status: str) -> None:
     try:
+        ip_hash = hash_ip(_client_key())
+        user_agent = (request.headers.get("User-Agent", "") or "")[:255]
         with get_db() as conn:
-            conn.execute(
-                "INSERT INTO account_security_events (account_id, event_type, event_status, ip_hash, user_agent) VALUES (?, ?, ?, ?, ?)",
-                (
-                    account_id,
-                    event_type,
-                    event_status,
-                    hash_ip(_client_key()),
-                    (request.headers.get("User-Agent", "") or "")[:255],
-                ),
+            insert_security_event(
+                conn,
+                account_id,
+                event_type,
+                event_status,
+                ip_hash=ip_hash,
+                user_agent=user_agent,
             )
-    except Exception:
+    except Exception as exc:
         # Security logging should never break the main request flow.
-        pass
+        logger.debug("Skipping security event '%s' for account %s: %s", event_type, account_id, exc)
 
 
 def is_rate_limited(client_key: str) -> bool:
@@ -2252,10 +2690,31 @@ def validate_origin_for_state_changes() -> tuple[Any, int] | None:
     if not origin and referer and not _is_same_origin(referer, request.host_url):
         return jsonify({"ok": False, "message": "Cross-origin request blocked."}), 403
 
+    has_auth_context = bool(
+        session.get("account_id")
+        or request.cookies.get(REMEMBER_COOKIE_NAME)
+        or request.cookies.get(app.config.get("SESSION_COOKIE_NAME", "session"))
+    )
+    if not origin and not referer and has_auth_context:
+        return jsonify({"ok": False, "message": "Missing request origin headers."}), 403
+
     # Optional stricter origin allow-list for deployments behind fixed domains.
     if ALLOWED_CORS_ORIGINS and origin and origin not in ALLOWED_CORS_ORIGINS:
         return jsonify({"ok": False, "message": "Origin is not allowed."}), 403
 
+    return None
+
+
+@app.before_request
+def run_admin_password_rotation_check() -> None:
+    rotation_summary = maybe_run_admin_password_rotation(force=False)
+    if rotation_summary.get("rotated", 0) > 0 or rotation_summary.get("failed", 0) > 0:
+        logger.info(
+            "Admin password rotation check: rotated=%s failed=%s skipped=%s",
+            rotation_summary.get("rotated", 0),
+            rotation_summary.get("failed", 0),
+            rotation_summary.get("skipped", 0),
+        )
     return None
 
 
@@ -2290,8 +2749,26 @@ def apply_security_headers(response: Response) -> Response:
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data: https:; font-src 'self' data: https:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https:;",
+    )
     response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+    response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+    response.headers.setdefault("Cross-Origin-Embedder-Policy", "unsafe-none")
     response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+    response.headers.setdefault("X-Permitted-Cross-Domain-Policies", "none")
+
+    if SECURITY_CONSOLE_NO_CACHE and (
+        request.path.startswith("/admin/security")
+        or request.path.startswith("/api/admin/security")
+        or request.path.startswith("/api/admin/security-panel")
+    ):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+
     if request.is_secure:
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     if getattr(g, "clear_remember_cookie", False):
@@ -2724,6 +3201,8 @@ def init_db() -> None:
         ensure_column(conn, "purchases", "next_renewal_date", "TIMESTAMP")
         ensure_column(conn, "purchases", "renewal_reminder_sent", "INTEGER DEFAULT 0")
         ensure_column(conn, "purchases", "last_renewed_at", "TIMESTAMP")
+        ensure_column(conn, "purchases", "payment_status", "TEXT NOT NULL DEFAULT 'completed'")
+        ensure_column(conn, "purchases", "payment_completed_at", "TIMESTAMP")
         ensure_column(conn, "daily_signals", "is_free", "INTEGER NOT NULL DEFAULT 0")
         ensure_column(conn, "daily_signals", "signal_time_utc", "TEXT NOT NULL DEFAULT '12:00'")
         ensure_column(conn, "daily_signals", "timer_minutes", "INTEGER NOT NULL DEFAULT 90")
@@ -2749,6 +3228,15 @@ def init_db() -> None:
         ensure_column(conn, "account_signal_cashouts", "shared_to_community", "INTEGER NOT NULL DEFAULT 0")
         ensure_column(conn, "account_signal_cashouts", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
 
+        conn.execute(
+            "UPDATE purchases SET payment_status = ? WHERE payment_status IS NULL OR trim(payment_status) = ''",
+            (PURCHASE_STATUS_COMPLETED,),
+        )
+        conn.execute(
+            "UPDATE purchases SET payment_completed_at = COALESCE(payment_completed_at, created_at) WHERE payment_status = ? AND payment_completed_at IS NULL",
+            (PURCHASE_STATUS_COMPLETED,),
+        )
+
         conn.execute("DROP TRIGGER IF EXISTS trg_accounts_force_verified_after_insert")
         conn.execute("DROP TRIGGER IF EXISTS trg_accounts_force_verified_after_update")
 
@@ -2761,7 +3249,7 @@ def init_db() -> None:
             username_value = str(row["username"] or "").strip().lower()
             if not username_value:
                 username_value = build_legacy_username(row["email"], int(row["id"]), existing_usernames)
-            is_admin = 1 if bool(row["is_admin"]) or is_auto_admin_email(row["email"]) or is_admin_username(username_value) else 0
+            is_admin = 1 if bool(row["is_admin"]) else 0
             verified_value = 1
             conn.execute(
                 "UPDATE accounts SET username = ?, verified = ?, is_admin = ?, verification_token = NULL, verification_token_hash = NULL, verification_token_created_at = NULL WHERE id = ?",
@@ -2826,6 +3314,7 @@ def init_db() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_accounts_email ON accounts(email)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_accounts_token_hash ON accounts(verification_token_hash)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_purchases_account_id ON purchases(account_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_purchases_account_status_expiry ON purchases(account_id, payment_status, expires_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_billing_transactions_account_id ON billing_transactions(account_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_security_events_account_id ON account_security_events(account_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_tokens_account_id ON auth_tokens(account_id)")
@@ -3151,6 +3640,256 @@ def ai_stock_signals() -> tuple[Any, int]:
     return jsonify(payload), 200
 
 
+@app.route("/admin/security/login")
+def admin_security_login_page() -> str:
+    if has_security_console_access():
+        return redirect(url_for("admin_security_page"))
+
+    return render_template(
+        "admin_security.html",
+        access_granted=False,
+        auth_mode="none",
+        security_panel_enabled=SECURITY_PANEL_ENABLED,
+    )
+
+
+@app.route("/admin/security")
+def admin_security_page() -> str:
+    if not has_security_console_access():
+        if SECURITY_CONSOLE_STEALTH_MODE:
+            return "", 404
+        return redirect(url_for("admin_security_login_page"))
+
+    auth_mode = resolve_security_console_auth_mode()
+    return render_template(
+        "admin_security.html",
+        access_granted=True,
+        auth_mode=auth_mode,
+        security_panel_enabled=SECURITY_PANEL_ENABLED,
+    )
+
+
+@app.post("/api/admin/security-panel/login")
+def admin_security_panel_login() -> tuple[Any, int]:
+    if not SECURITY_PANEL_ENABLED:
+        return jsonify({"ok": False, "message": "Security panel login is disabled."}), 404
+
+    if is_rate_limited(_client_key()):
+        log_security_event(None, "security_panel_login", "rate_limited")
+        return jsonify({"ok": False, "message": "Too many login attempts. Please wait and try again."}), 429
+
+    payload = request.get_json(silent=True) or {}
+    username = str(payload.get("username", "")).strip()
+    password = str(payload.get("password", ""))
+
+    if not username or not password:
+        return jsonify({"ok": False, "message": "Username and password are required."}), 400
+
+    valid_username = username.lower() == SECURITY_PANEL_ADMIN_USERNAME.lower()
+    valid_password = verify_security_panel_password(password)
+
+    if not valid_username or not valid_password:
+        log_security_event(None, "security_panel_login", "failed")
+        return jsonify({"ok": False, "message": "Invalid security console credentials."}), 401
+
+    session[SECURITY_PANEL_SESSION_KEY] = True
+    session[SECURITY_PANEL_SESSION_USERNAME_KEY] = SECURITY_PANEL_ADMIN_USERNAME.lower()
+    session["security_panel_authenticated_at"] = utc_now().strftime("%Y-%m-%d %H:%M:%S")
+    log_security_event(None, "security_panel_login", "success")
+    return jsonify({"ok": True, "message": "Security console login successful."}), 200
+
+
+@app.post("/api/admin/security-panel/logout")
+def admin_security_panel_logout() -> tuple[Any, int]:
+    session.pop(SECURITY_PANEL_SESSION_KEY, None)
+    session.pop(SECURITY_PANEL_SESSION_USERNAME_KEY, None)
+    session.pop("security_panel_authenticated_at", None)
+    log_security_event(None, "security_panel_logout", "success")
+    return jsonify({"ok": True}), 200
+
+
+@app.get("/api/admin/security/records")
+def admin_security_records() -> tuple[Any, int]:
+    principal, error_response = require_security_console_api()
+    if error_response is not None:
+        return error_response
+
+    account_limit = clamp_int_value(request.args.get("accounts"), 20, 500, 150)
+    event_limit = clamp_int_value(request.args.get("events"), 50, 1000, 300)
+
+    with get_db() as conn:
+        total_accounts_row = conn.execute("SELECT COUNT(*) AS count FROM accounts").fetchone()
+        total_accounts = int((total_accounts_row["count"] if total_accounts_row else 0) or 0)
+
+        admin_accounts_row = conn.execute("SELECT COUNT(*) AS count FROM accounts WHERE is_admin = 1").fetchone()
+        admin_accounts = int((admin_accounts_row["count"] if admin_accounts_row else 0) or 0)
+
+        verified_accounts_row = conn.execute("SELECT COUNT(*) AS count FROM accounts WHERE verified = 1").fetchone()
+        verified_accounts = int((verified_accounts_row["count"] if verified_accounts_row else 0) or 0)
+
+        active_tokens_row = conn.execute("SELECT COUNT(*) AS count FROM auth_tokens WHERE expires_at > CURRENT_TIMESTAMP").fetchone()
+        active_tokens = int((active_tokens_row["count"] if active_tokens_row else 0) or 0)
+
+        events_last_day_row = conn.execute(
+            "SELECT COUNT(*) AS count FROM account_security_events WHERE created_at >= datetime('now', '-1 day')"
+        ).fetchone()
+        events_last_day = int((events_last_day_row["count"] if events_last_day_row else 0) or 0)
+
+        blocked_db_attempts_row = conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM account_security_events
+            WHERE event_type = 'database_access'
+              AND event_status = 'blocked_email_allowlist'
+              AND created_at >= datetime('now', '-1 day')
+            """
+        ).fetchone()
+        blocked_db_attempts_last_day = int((blocked_db_attempts_row["count"] if blocked_db_attempts_row else 0) or 0)
+
+        owner_allowlisted_accounts = 0
+        if DATABASE_ACCESS_ALLOWED_EMAILS:
+            account_emails = conn.execute("SELECT email FROM accounts").fetchall()
+            for row in account_emails:
+                email = str(row["email"] or "").strip().lower()
+                if email in DATABASE_ACCESS_ALLOWED_EMAILS:
+                    owner_allowlisted_accounts += 1
+
+        account_rows = conn.execute(
+            """
+            SELECT
+                a.id,
+                a.username,
+                a.email,
+                a.is_admin,
+                a.verified,
+                a.created_at,
+                (
+                    SELECT COUNT(*)
+                    FROM auth_tokens t
+                    WHERE t.account_id = a.id AND t.expires_at > CURRENT_TIMESTAMP
+                ) AS active_tokens,
+                (
+                    SELECT se.created_at
+                    FROM account_security_events se
+                    WHERE se.account_id = a.id
+                    ORDER BY se.id DESC
+                    LIMIT 1
+                ) AS last_security_event_at,
+                (
+                    SELECT se.event_type
+                    FROM account_security_events se
+                    WHERE se.account_id = a.id
+                    ORDER BY se.id DESC
+                    LIMIT 1
+                ) AS last_security_event_type,
+                (
+                    SELECT se.event_status
+                    FROM account_security_events se
+                    WHERE se.account_id = a.id
+                    ORDER BY se.id DESC
+                    LIMIT 1
+                ) AS last_security_event_status
+            FROM accounts a
+            ORDER BY a.id DESC
+            LIMIT ?
+            """,
+            (account_limit,),
+        ).fetchall()
+
+        event_rows = conn.execute(
+            """
+            SELECT
+                se.id,
+                se.account_id,
+                se.event_type,
+                se.event_status,
+                se.ip_hash,
+                se.user_agent,
+                se.created_at,
+                a.username,
+                a.email
+            FROM account_security_events se
+            LEFT JOIN accounts a ON a.id = se.account_id
+            ORDER BY se.id DESC
+            LIMIT ?
+            """,
+            (event_limit,),
+        ).fetchall()
+
+        table_counts: dict[str, int] = {}
+        table_queries = {
+            "accounts": "SELECT COUNT(*) AS count FROM accounts",
+            "auth_tokens": "SELECT COUNT(*) AS count FROM auth_tokens",
+            "account_security_events": "SELECT COUNT(*) AS count FROM account_security_events",
+            "daily_signals": "SELECT COUNT(*) AS count FROM daily_signals",
+            "purchases": "SELECT COUNT(*) AS count FROM purchases",
+            "community_chat_messages": "SELECT COUNT(*) AS count FROM community_chat_messages",
+            "community_posts": "SELECT COUNT(*) AS count FROM community_posts",
+        }
+        existing_tables = {
+            str(row["name"])
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+        }
+        for table_name, query in table_queries.items():
+            if table_name not in existing_tables:
+                table_counts[table_name] = 0
+                continue
+            row = conn.execute(query).fetchone()
+            table_counts[table_name] = int((row["count"] if row else 0) or 0)
+
+    accounts_payload = [
+        {
+            "id": int(row["id"]),
+            "username": row["username"],
+            "email": row["email"],
+            "isAdmin": bool(row["is_admin"]),
+            "isVerified": bool(row["verified"]),
+            "isAllowlistedOwner": is_database_access_email(row["email"]),
+            "createdAt": row["created_at"],
+            "activeTokens": int(row["active_tokens"] or 0),
+            "lastSecurityEventAt": row["last_security_event_at"],
+            "lastSecurityEventType": row["last_security_event_type"],
+            "lastSecurityEventStatus": row["last_security_event_status"],
+        }
+        for row in account_rows
+    ]
+
+    events_payload = [
+        {
+            "id": int(row["id"]),
+            "accountId": int(row["account_id"]) if row["account_id"] is not None else None,
+            "username": row["username"] or "(system)",
+            "email": row["email"],
+            "eventType": row["event_type"],
+            "eventStatus": row["event_status"],
+            "ipHash": row["ip_hash"],
+            "userAgent": row["user_agent"],
+            "createdAt": row["created_at"],
+        }
+        for row in event_rows
+    ]
+
+    return jsonify(
+        {
+            "ok": True,
+            "auth": principal,
+            "summary": {
+                "totalAccounts": total_accounts,
+                "adminAccounts": admin_accounts,
+                "verifiedAccounts": verified_accounts,
+                "activeSessions": active_tokens,
+                "securityEventsLast24h": events_last_day,
+                "blockedDatabaseAttemptsLast24h": blocked_db_attempts_last_day,
+                "ownerAllowlistedAccounts": owner_allowlisted_accounts,
+                "allowedOwnerEmails": sorted(DATABASE_ACCESS_ALLOWED_EMAILS),
+            },
+            "accounts": accounts_payload,
+            "securityEvents": events_payload,
+            "databaseTableCounts": table_counts,
+        }
+    ), 200
+
+
 @app.route("/admin/signals")
 def admin_signals_page() -> str:
     if g.current_account is None:
@@ -3453,7 +4192,7 @@ def create_account() -> tuple[Any, int]:
         return jsonify({"ok": False, "message": "Enter a valid email address."}), 400
 
     password_hash = generate_password_hash(password)
-    is_admin = 1 if is_auto_admin_email(email) else 0
+    is_admin = 0
     verified = 1
 
     try:
@@ -3735,8 +4474,8 @@ def update_account_security() -> tuple[Any, int]:
             log_security_event(account_id, "account_security_update", "invalid_password")
             return jsonify({"ok": False, "message": "Current password is incorrect."}), 401
 
-        updates: list[str] = []
-        params: list[Any] = []
+        email_to_update: str | None = None
+        password_hash_to_update: str | None = None
 
         if new_email and new_email != str(account["email"]).strip().lower():
             email_regex = r"^[\w\.-]+@[\w\.-]+\.\w+$"
@@ -3745,20 +4484,20 @@ def update_account_security() -> tuple[Any, int]:
             email_conflict = conn.execute("SELECT id FROM accounts WHERE email = ? AND id != ?", (new_email, account_id)).fetchone()
             if email_conflict is not None:
                 return jsonify({"ok": False, "message": "Email is already in use."}), 409
-            updates.append("email = ?")
-            params.append(new_email)
+            email_to_update = new_email
 
         if new_password:
             if len(new_password) < 8:
                 return jsonify({"ok": False, "message": "New password must be at least 8 characters."}), 400
-            updates.append("password_hash = ?")
-            params.append(generate_password_hash(new_password))
+            password_hash_to_update = generate_password_hash(new_password)
 
-        if not updates:
+        if email_to_update is None and password_hash_to_update is None:
             return jsonify({"ok": False, "message": "No account changes were provided."}), 400
 
-        params.append(account_id)
-        conn.execute(f"UPDATE accounts SET {', '.join(updates)} WHERE id = ?", tuple(params))
+        if email_to_update is not None:
+            conn.execute("UPDATE accounts SET email = ? WHERE id = ?", (email_to_update, account_id))
+        if password_hash_to_update is not None:
+            conn.execute("UPDATE accounts SET password_hash = ? WHERE id = ?", (password_hash_to_update, account_id))
         log_security_event(account_id, "account_security_update", "success")
 
     return jsonify({"ok": True, "message": "Account security settings updated."}), 200
@@ -4140,9 +4879,39 @@ def purchase() -> tuple[Any, int]:
             resolved_tier_name = f"Tier {tier_number}"
             plan_name = DISCORD_TAG_LABELS[resolved_tag]
             signals_per_day = tier_number
+            pending_expires_at = format_db_timestamp(utc_now())
+            entitlement_expires_at = format_db_timestamp(resolve_purchase_expiry(billing_cycle))
 
             conn.execute(
-                "INSERT INTO purchases (account_id, tier_name, tier_number, plan_name, billing_cycle, billing_method, price_gbp, signals_per_day, billing_name, billing_company, billing_address, billing_zip, billing_country, billing_name_enc, billing_company_enc, billing_address_enc, billing_zip_enc, billing_country_enc, discord_username, discord_tag) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                """
+                INSERT INTO purchases (
+                    account_id,
+                    tier_name,
+                    tier_number,
+                    plan_name,
+                    billing_cycle,
+                    billing_method,
+                    price_gbp,
+                    signals_per_day,
+                    billing_name,
+                    billing_company,
+                    billing_address,
+                    billing_zip,
+                    billing_country,
+                    billing_name_enc,
+                    billing_company_enc,
+                    billing_address_enc,
+                    billing_zip_enc,
+                    billing_country_enc,
+                    discord_username,
+                    discord_tag,
+                    expires_at,
+                    next_renewal_date,
+                    payment_status,
+                    payment_completed_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                """,
                 (
                     user["id"],
                     resolved_tier_name,
@@ -4164,6 +4933,9 @@ def purchase() -> tuple[Any, int]:
                     encrypt_value(billing_country),
                     None,
                     resolved_tag,
+                    pending_expires_at,
+                    entitlement_expires_at,
+                    PURCHASE_STATUS_PENDING,
                 ),
             )
 
@@ -4197,7 +4969,7 @@ def purchase() -> tuple[Any, int]:
                     "pending",
                 ),
             )
-            log_security_event(user["id"], "purchase", "success")
+            log_security_event(user["id"], "purchase", "pending_payment")
 
             currency_choice = resolve_currency_preference(user)
             converted_price = convert_currency_amount(price, "GBP", currency_choice["code"])
@@ -4205,7 +4977,7 @@ def purchase() -> tuple[Any, int]:
             return jsonify(
                 {
                     "ok": True,
-                    "message": f"{resolved_tier_name} ({signals_per_day} signal/day) confirmed at {currency_choice['code']} {converted_price} on {billing_cycle} billing.",
+                    "message": f"{resolved_tier_name} order created at {currency_choice['code']} {converted_price}. Access unlocks after payment confirmation.",
                     "summary": {
                         "tier": tier_number,
                         "signalsPerDay": signals_per_day,
@@ -4220,18 +4992,8 @@ def purchase() -> tuple[Any, int]:
                 }
             ), 201
 
-        if not tier_name:
-            log_security_event(user["id"], "purchase", "validation_failed")
-            return jsonify({"ok": False, "message": "Tier name is required for this purchase action."}), 400
-
-        conn.execute(
-            "INSERT INTO purchases (account_id, tier_name, discord_username, discord_tag) VALUES (?, ?, ?, ?)",
-            (user["id"], tier_name, None, user["discord_tag"]),
-        )
-
-    log_security_event(user["id"], "purchase", "success")
-
-    return jsonify({"ok": True, "message": f"{tier_name} has been added to your account."}), 201
+        log_security_event(user["id"], "purchase", "validation_failed")
+        return jsonify({"ok": False, "message": "Tier number, billing cycle, and billing method are required to create a purchase."}), 400
 
 
 @app.get("/api/member/signals")
@@ -4243,8 +5005,15 @@ def member_signals() -> tuple[Any, int]:
     with get_db() as conn:
         ensure_daily_signals(conn)
         purchases = conn.execute(
-            "SELECT id, tier_name, tier_number, plan_name, billing_cycle, billing_method, price_gbp, signals_per_day, created_at, expires_at, months_active FROM purchases WHERE account_id = ? AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP) ORDER BY created_at DESC",
-            (int(g.current_account["id"]),),
+                        """
+                        SELECT id, tier_name, tier_number, plan_name, billing_cycle, billing_method, price_gbp, signals_per_day, created_at, expires_at, months_active
+                        FROM purchases
+                        WHERE account_id = ?
+                            AND payment_status = ?
+                            AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+                        ORDER BY created_at DESC
+                        """,
+                        (int(g.current_account["id"]), PURCHASE_STATUS_COMPLETED),
         ).fetchall()
 
         max_signals = max([int(row["signals_per_day"] or 0) for row in purchases], default=0)
@@ -4313,46 +5082,83 @@ def create_purchase() -> tuple[Any, int]:
         return jsonify({"ok": False, "message": "Provide a valid JSON body."}), 400
 
     try:
-        tier_number = int(data.get("tierNumber", TIER_NUMBER_MIN))
-        price_gbp = float(data.get("priceGbp", 0))
-        signals_per_day = int(data.get("signalsPerDay", 1))
+        tier_number = int(data.get("tierNumber", 0))
     except (TypeError, ValueError):
-        return jsonify({"ok": False, "message": "Tier, price and signals per day must be valid numbers."}), 400
+        return jsonify({"ok": False, "message": "Tier number must be a valid integer."}), 400
 
-    tier_name = str(data.get("tierName", f"Tier {tier_number}")).strip() or f"Tier {tier_number}"
-    plan_name = str(data.get("planName", DEFAULT_BILLING_CYCLE.title())).strip() or DEFAULT_BILLING_CYCLE.title()
     billing_cycle = str(data.get("billingCycle", DEFAULT_BILLING_CYCLE)).strip().lower() or DEFAULT_BILLING_CYCLE
     billing_method = str(data.get("billingMethod", "paypal")).strip().lower() or "paypal"
+    discord_tag = normalize_discord_tag(str(data.get("discordTag", "")))
 
     if tier_number < TIER_NUMBER_MIN or tier_number > TIER_NUMBER_MAX:
         return jsonify({"ok": False, "message": f"Tier number must be between {TIER_NUMBER_MIN} and {TIER_NUMBER_MAX}."}), 400
-    if price_gbp <= 0:
-        return jsonify({"ok": False, "message": "Invalid price."}), 400
-    if signals_per_day <= 0:
-        return jsonify({"ok": False, "message": "Signals per day must be greater than zero."}), 400
     if billing_cycle not in VALID_BILLING_CYCLES:
         return jsonify({"ok": False, "message": "Unsupported billing cycle."}), 400
     if billing_method not in PAYMENT_LINKS:
         return jsonify({"ok": False, "message": "Unsupported billing method."}), 400
 
-    expiry_date = None if billing_cycle == "lifetime" else utc_now() + timedelta(days=BILLING_CYCLE_DAYS.get(billing_cycle, BILLING_CYCLE_DAYS.get(DEFAULT_BILLING_CYCLE, 30)))
-    next_renewal = expiry_date
-
     account_id = int(g.current_account["id"])
     with get_db() as conn:
-        ensure_community_profile(conn, account_id, str(g.current_account["username"] or "member"))
+        user = fetch_account_by_id(conn, account_id)
+        if user is None:
+            return jsonify({"ok": False, "message": "Account session is invalid. Please log in again."}), 401
 
-        # Insert purchase
+        ensure_community_profile(conn, account_id, str(g.current_account["username"] or "member"))
+        resolved_tag = discord_tag or user["discord_tag"] or "final"
+        if resolved_tag not in DISCORD_TAG_LEVELS:
+            return jsonify({"ok": False, "message": "Discord tag is invalid for billing."}), 400
+
+        price_gbp = get_price_for_selection(tier_number, resolved_tag, billing_cycle)
+        if price_gbp is None:
+            return jsonify({"ok": False, "message": "Selected pricing combination is not available."}), 400
+        if billing_cycle == "lifetime" and tier_number < 4:
+            return jsonify({"ok": False, "message": "Lifetime is available only from Tier 4 upward."}), 400
+
+        tier_name = f"Tier {tier_number}"
+        plan_name = DISCORD_TAG_LABELS.get(resolved_tag, resolved_tag.title())
+        signals_per_day = tier_number
+        pending_expires_at = format_db_timestamp(utc_now())
+        entitlement_expires_at = format_db_timestamp(resolve_purchase_expiry(billing_cycle))
+
         conn.execute(
             """
-            INSERT INTO purchases (account_id, tier_name, tier_number, plan_name, billing_cycle, billing_method, price_gbp, signals_per_day, created_at, expires_at, months_active, auto_renew, next_renewal_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, 1, 1, ?)
+            INSERT INTO purchases (
+                account_id,
+                tier_name,
+                tier_number,
+                plan_name,
+                billing_cycle,
+                billing_method,
+                price_gbp,
+                signals_per_day,
+                discord_tag,
+                created_at,
+                expires_at,
+                months_active,
+                auto_renew,
+                next_renewal_date,
+                payment_status,
+                payment_completed_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, 0, 1, ?, ?, NULL)
             """,
-            (account_id, tier_name, tier_number, plan_name, billing_cycle, billing_method, price_gbp, signals_per_day, format_db_timestamp(expiry_date), format_db_timestamp(next_renewal))
+            (
+                account_id,
+                tier_name,
+                tier_number,
+                plan_name,
+                billing_cycle,
+                billing_method,
+                price_gbp,
+                signals_per_day,
+                resolved_tag,
+                pending_expires_at,
+                entitlement_expires_at,
+                PURCHASE_STATUS_PENDING,
+            ),
         )
         purchase_id = conn.execute("SELECT last_insert_rowid() as id").fetchone()["id"]
-        
-        # Create transaction record
+
         invoice_number = f"INV-{purchase_id}-{utc_now().strftime('%Y%m%d')}"
         conn.execute(
             """
@@ -4361,36 +5167,22 @@ def create_purchase() -> tuple[Any, int]:
             """,
             (account_id, purchase_id, price_gbp, billing_method, invoice_number, f"Purchase {tier_name} - {signals_per_day} signals/day")
         )
-        
-        # Update or create loyalty record
-        loyalty = conn.execute("SELECT * FROM customer_loyalty WHERE account_id = ?", (account_id,)).fetchone()
-        if loyalty:
-            conn.execute(
-                "UPDATE customer_loyalty SET months_active = months_active + 1, total_spent_gbp = total_spent_gbp + ?, last_purchase_at = CURRENT_TIMESTAMP WHERE account_id = ?",
-                (price_gbp, account_id)
-            )
-        else:
-            conn.execute(
-                "INSERT INTO customer_loyalty (account_id, customer_since, months_active, total_spent_gbp, last_purchase_at) VALUES (?, CURRENT_TIMESTAMP, 1, ?, CURRENT_TIMESTAMP)",
-                (account_id, price_gbp)
-            )
-        
-        if expiry_date is not None:
-            reminder_date = expiry_date - timedelta(days=RENEWAL_REMINDER_LEAD_DAYS)
-            conn.execute(
-                """
-                INSERT INTO email_queue (account_id, email_type, recipient_email, scheduled_for, status)
-                VALUES (?, 'renewal_reminder', ?, ?, 'pending')
-                """,
-                (account_id, g.current_account["email"], format_db_timestamp(reminder_date))
-            )
-
+        payment_url = get_payment_forward_url(billing_method)
+        conn.execute(
+            """
+            INSERT INTO billing_transactions (account_id, purchase_id, tier_number, plan_name, billing_cycle, billing_method, price_gbp, payment_url, payment_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+            """,
+            (account_id, purchase_id, tier_number, plan_name, billing_cycle, billing_method, price_gbp, payment_url),
+        )
+        log_security_event(account_id, "member_purchase", "pending_payment")
 
     return jsonify({
         "ok": True,
-        "message": f"Purchase created! You now have access to {signals_per_day} signal(s) per day.",
+        "message": "Purchase created. Access unlocks after payment confirmation.",
         "purchaseId": purchase_id,
         "invoiceNumber": invoice_number,
+        "paymentUrl": payment_url,
     }), 201
 
 
@@ -4698,8 +5490,14 @@ def community_settings_update() -> tuple[Any, int]:
     account_id = int(g.current_account["id"])
     with get_db() as conn:
         tier_row = conn.execute(
-            "SELECT MAX(tier_number) AS top FROM purchases WHERE account_id = ? AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)",
-            (account_id,),
+                        """
+                        SELECT MAX(tier_number) AS top
+                        FROM purchases
+                        WHERE account_id = ?
+                            AND payment_status = ?
+                            AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+                        """,
+                        (account_id, PURCHASE_STATUS_COMPLETED),
         ).fetchone()
         top_tier = int(tier_row["top"] or 0) if tier_row and tier_row["top"] else 0
         user_rank = COMMUNITY_RANK_BY_TIER.get(top_tier, f"Tier {top_tier}" if top_tier else "")
@@ -5145,6 +5943,7 @@ def community_chat_global_list() -> tuple[Any, int]:
                        SELECT MAX(COALESCE(p.tier_number, 0))
                        FROM purchases p
                        WHERE p.account_id = a.id
+                     AND p.payment_status = ?
                          AND (p.expires_at IS NULL OR p.expires_at > CURRENT_TIMESTAMP)
                    ), 0) AS sender_tier
             FROM chat_messages m
@@ -5153,7 +5952,8 @@ def community_chat_global_list() -> tuple[Any, int]:
             WHERE m.channel_type = 'global' AND m.is_deleted = 0
             ORDER BY m.id DESC
             LIMIT 100
-            """
+            """,
+            (PURCHASE_STATUS_COMPLETED,),
         ).fetchall()
 
     ordered = list(reversed(rows))
@@ -5225,6 +6025,7 @@ def community_chat_whisper_list(username: str) -> tuple[Any, int]:
                                                  SELECT MAX(COALESCE(p.tier_number, 0))
                                                  FROM purchases p
                                                  WHERE p.account_id = a.id
+                                                     AND p.payment_status = ?
                                                      AND (p.expires_at IS NULL OR p.expires_at > CURRENT_TIMESTAMP)
                                          ), 0) AS sender_tier
             FROM chat_messages m
@@ -5236,7 +6037,7 @@ def community_chat_whisper_list(username: str) -> tuple[Any, int]:
             ORDER BY m.id DESC
             LIMIT 100
             """,
-            (requester_id, target_id, target_id, requester_id),
+                        (PURCHASE_STATUS_COMPLETED, requester_id, target_id, target_id, requester_id),
         ).fetchall()
 
     ordered = list(reversed(rows))
@@ -5388,20 +6189,27 @@ def paypal_checkout() -> tuple[Any, int]:
     
     with get_db() as conn:
         purchase = conn.execute(
-            "SELECT * FROM purchases WHERE id = ? AND account_id = ?",
-            (purchase_id, int(g.current_account["id"]))
+            "SELECT id, account_id, price_gbp, payment_status FROM purchases WHERE id = ? AND account_id = ?",
+            (purchase_id, int(g.current_account["id"])),
         ).fetchone()
         
         if not purchase:
             return jsonify({"ok": False, "message": "Purchase not found."}), 404
+
+        if str(purchase["payment_status"] or "").lower() == PURCHASE_STATUS_COMPLETED:
+            return jsonify({"ok": False, "message": "Purchase is already paid."}), 409
         
         # Create checkout session (placeholder - waiting for PayPal credentials)
         checkout_session_id = f"CHECKOUT-{purchase_id}-{utc_now().strftime('%Y%m%d%H%M%S')}"
         
         # Update transaction status to pending_payment
         conn.execute(
-            "UPDATE transactions SET status = 'pending_payment' WHERE purchase_id = ?",
-            (purchase_id,)
+            "UPDATE transactions SET status = 'pending_payment' WHERE purchase_id = ? AND status != 'completed'",
+            (purchase_id,),
+        )
+        conn.execute(
+            "UPDATE billing_transactions SET payment_status = 'pending' WHERE purchase_id = ?",
+            (purchase_id,),
         )
     
     return jsonify({
@@ -5424,35 +6232,114 @@ def paypal_webhook() -> tuple[Any, int]:
         logger.warning("Rejected PayPal webhook: signature verification failed.")
         return jsonify({"ok": False, "message": "Invalid webhook signature."}), 400
 
-    event_type = data.get("event_type", "")
-    
-    if event_type == "CHECKOUT.ORDER.APPROVED":
+    event_type = str(data.get("event_type", "") or "").strip()
+    if event_type not in {"CHECKOUT.ORDER.APPROVED", "PAYMENT.CAPTURE.COMPLETED"}:
+        return jsonify({"ok": True}), 200
+
+    resource = data.get("resource") if isinstance(data.get("resource"), dict) else {}
+    purchase_units = resource.get("purchase_units") if isinstance(resource.get("purchase_units"), list) else []
+    first_purchase_unit = purchase_units[0] if purchase_units and isinstance(purchase_units[0], dict) else {}
+    amount_payload = first_purchase_unit.get("amount") if isinstance(first_purchase_unit.get("amount"), dict) else {}
+    reported_currency = str(amount_payload.get("currency_code", "") or "").upper().strip()
+    try:
+        reported_amount = float(amount_payload.get("value")) if amount_payload.get("value") is not None else None
+    except (TypeError, ValueError):
+        reported_amount = None
+
+    purchase_id = 0
+    for candidate in (
+        resource.get("purchase_id"),
+        resource.get("custom_id"),
+        first_purchase_unit.get("custom_id"),
+        first_purchase_unit.get("reference_id"),
+    ):
         try:
-            purchase_id = int(data.get("resource", {}).get("purchase_id", 0))
+            resolved = int(str(candidate or "").strip())
         except (TypeError, ValueError):
-            purchase_id = 0
-        
-        if purchase_id > 0:
-            with get_db() as conn:
-                # Update transaction and purchase to completed
+            continue
+        if resolved > 0:
+            purchase_id = resolved
+            break
+
+    if purchase_id <= 0:
+        logger.warning("Rejected PayPal webhook: purchase id missing from payload.")
+        return jsonify({"ok": False, "message": "Purchase id missing."}), 400
+
+    with get_db() as conn:
+        purchase = conn.execute(
+            "SELECT id, account_id, billing_cycle, price_gbp, payment_status, months_active FROM purchases WHERE id = ?",
+            (purchase_id,),
+        ).fetchone()
+        if purchase is None:
+            logger.warning("Rejected PayPal webhook: unknown purchase id %s.", purchase_id)
+            return jsonify({"ok": False, "message": "Purchase not found."}), 404
+
+        if str(purchase["payment_status"] or "").lower() == PURCHASE_STATUS_COMPLETED:
+            return jsonify({"ok": True, "message": "Purchase already completed."}), 200
+
+        expected_amount = float(purchase["price_gbp"] or 0)
+        if reported_amount is not None and abs(reported_amount - expected_amount) > 0.01:
+            logger.warning(
+                "Rejected PayPal webhook for purchase %s due to amount mismatch. expected=%s got=%s",
+                purchase_id,
+                expected_amount,
+                reported_amount,
+            )
+            return jsonify({"ok": False, "message": "Payment amount mismatch."}), 400
+        if reported_currency and reported_currency != "GBP":
+            logger.warning(
+                "Rejected PayPal webhook for purchase %s due to currency mismatch. expected=GBP got=%s",
+                purchase_id,
+                reported_currency,
+            )
+            return jsonify({"ok": False, "message": "Unsupported payment currency."}), 400
+
+        entitlement_expires = format_db_timestamp(resolve_purchase_expiry(str(purchase["billing_cycle"] or "")))
+        conn.execute(
+            """
+            UPDATE purchases
+            SET payment_status = ?,
+                payment_completed_at = CURRENT_TIMESTAMP,
+                last_renewed_at = CURRENT_TIMESTAMP,
+                expires_at = ?,
+                next_renewal_date = ?,
+                months_active = CASE WHEN COALESCE(months_active, 0) < 1 THEN 1 ELSE months_active + 1 END,
+                renewal_reminder_sent = 0
+            WHERE id = ?
+            """,
+            (PURCHASE_STATUS_COMPLETED, entitlement_expires, entitlement_expires, purchase_id),
+        )
+        conn.execute("UPDATE transactions SET status = 'completed' WHERE purchase_id = ?", (purchase_id,))
+        conn.execute("UPDATE billing_transactions SET payment_status = 'paid' WHERE purchase_id = ?", (purchase_id,))
+
+        account_id = int(purchase["account_id"])
+        loyalty = conn.execute("SELECT account_id FROM customer_loyalty WHERE account_id = ?", (account_id,)).fetchone()
+        if loyalty:
+            conn.execute(
+                "UPDATE customer_loyalty SET months_active = months_active + 1, total_spent_gbp = total_spent_gbp + ?, last_purchase_at = CURRENT_TIMESTAMP WHERE account_id = ?",
+                (expected_amount, account_id),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO customer_loyalty (account_id, customer_since, months_active, total_spent_gbp, last_purchase_at) VALUES (?, CURRENT_TIMESTAMP, 1, ?, CURRENT_TIMESTAMP)",
+                (account_id, expected_amount),
+            )
+
+        account = conn.execute("SELECT email FROM accounts WHERE id = ?", (account_id,)).fetchone()
+        if account and account["email"]:
+            conn.execute(
+                "INSERT INTO email_queue (account_id, email_type, recipient_email, status) VALUES (?, 'purchase_confirmation', ?, 'pending')",
+                (account_id, account["email"]),
+            )
+            entitlement_expiry_dt = parse_db_timestamp(entitlement_expires)
+            if entitlement_expiry_dt is not None:
+                reminder_date = entitlement_expiry_dt - timedelta(days=RENEWAL_REMINDER_LEAD_DAYS)
                 conn.execute(
-                    "UPDATE transactions SET status = 'completed' WHERE purchase_id = ?",
-                    (purchase_id,)
+                    "INSERT INTO email_queue (account_id, email_type, recipient_email, scheduled_for, status) VALUES (?, 'renewal_reminder', ?, ?, 'pending')",
+                    (account_id, account["email"], format_db_timestamp(reminder_date)),
                 )
-                conn.execute(
-                    "UPDATE purchases SET last_renewed_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (purchase_id,)
-                )
-                
-                # Queue thank you email
-                purchase = conn.execute("SELECT account_id FROM purchases WHERE id = ?", (purchase_id,)).fetchone()
-                if purchase:
-                    account = conn.execute("SELECT email FROM accounts WHERE id = ?", (purchase["account_id"],)).fetchone()
-                    if account:
-                        conn.execute(
-                            "INSERT INTO email_queue (account_id, email_type, recipient_email, status) VALUES (?, 'purchase_confirmation', ?, 'pending')",
-                            (purchase["account_id"], account["email"])
-                        )
+
+        log_security_event(account_id, "payment_webhook", "completed")
     
     return jsonify({"ok": True}), 200
 
@@ -5533,6 +6420,30 @@ def admin_send_renewal_reminders() -> tuple[Any, int]:
         "message": f"Sent {sent_count} renewal reminders.",
         "remindersSent": sent_count,
     }), 200
+
+
+@app.post("/api/admin/security/rotate-passwords")
+def admin_rotate_passwords() -> tuple[Any, int]:
+    admin_user, error_response = require_admin_api()
+    if error_response is not None:
+        return error_response
+
+    payload = request.get_json(silent=True) or {}
+    force_rotation = bool(payload.get("force", True))
+
+    if not force_rotation and not ADMIN_DAILY_PASSWORD_ROTATION_ENABLED:
+        return jsonify({"ok": False, "message": "Admin password rotation is disabled."}), 400
+
+    summary = maybe_run_admin_password_rotation(force=force_rotation)
+    return jsonify(
+        {
+            "ok": True,
+            "message": "Admin password rotation completed.",
+            "force": force_rotation,
+            "requestedBy": admin_user["username"],
+            "summary": summary,
+        }
+    ), 200
 
 
 def send_renewal_reminder_email(email: str, account_name: str, expires_at: str, signals_per_day: int) -> bool:
@@ -5916,10 +6827,10 @@ def submit_feedback() -> tuple[Any, int]:
 
     return jsonify({"ok": True, "message": "Thank you! Your feedback has been received."}), 200
 
+init_db()
+
 
 if __name__ == "__main__":
-    validate_security_configuration()
-    init_db()
     app.run(
         host=os.getenv("FLASK_RUN_HOST", "127.0.0.1"),
         port=int(os.getenv("FLASK_RUN_PORT", "5000")),

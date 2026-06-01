@@ -1,5 +1,14 @@
 let adminSignalsCache = [];
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function setAdminMessage(message, ok = false) {
   const node = document.getElementById('adminSignalMessage');
   if (!node) return;
@@ -114,29 +123,43 @@ function renderAdminSignalsTable(signals) {
         </tr>
       </thead>
       <tbody>
-        ${signals.map((signal) => `
+        ${signals.map((signal) => {
+          const safeId = escapeHtml(signal.id);
+          const safeTier = escapeHtml(signal.tierNumber);
+          const safeAsset = escapeHtml(signal.assetSymbol);
+          const safeDirection = escapeHtml(signal.direction);
+          const safeTime = escapeHtml(signal.signalTimeUtc || '--:--');
+          const safeTimer = escapeHtml(signal.timerMinutes || 90);
+          const safeEntry = escapeHtml(signal.entryPrice);
+          const safeTarget = escapeHtml(signal.targetPrice);
+          const safeStop = escapeHtml(signal.stopPrice);
+          const safeStatus = escapeHtml(signal.status);
+          const nextStatus = signal.status === 'published' ? 'draft' : 'published';
+          const safeNextStatus = escapeHtml(nextStatus);
+          return `
           <tr>
-            <td>${signal.id}</td>
-            <td>${signal.tierNumber}</td>
-            <td>${signal.assetSymbol}</td>
-            <td>${signal.direction}</td>
-            <td>${signal.signalTimeUtc || '--:--'}</td>
-            <td>${signal.timerMinutes || 90}m</td>
-            <td>${signal.entryPrice}</td>
-            <td>${signal.targetPrice}</td>
-            <td>${signal.stopPrice}</td>
-            <td>${signal.status}</td>
+            <td>${safeId}</td>
+            <td>${safeTier}</td>
+            <td>${safeAsset}</td>
+            <td>${safeDirection}</td>
+            <td>${safeTime}</td>
+            <td>${safeTimer}m</td>
+            <td>${safeEntry}</td>
+            <td>${safeTarget}</td>
+            <td>${safeStop}</td>
+            <td>${safeStatus}</td>
             <td>
               <div class="admin-table-actions">
-                <button class="ghost-btn admin-status-btn" data-id="${signal.id}" data-next="${signal.status === 'published' ? 'draft' : 'published'}">
+                <button class="ghost-btn admin-status-btn" data-id="${safeId}" data-next="${safeNextStatus}">
                   ${signal.status === 'published' ? 'Unpublish' : 'Publish'}
                 </button>
-                <button class="ghost-btn admin-edit-btn" data-id="${signal.id}">Edit</button>
-                <button class="ghost-btn danger-btn admin-delete-btn" data-id="${signal.id}">Delete</button>
+                <button class="ghost-btn admin-edit-btn" data-id="${safeId}">Edit</button>
+                <button class="ghost-btn danger-btn admin-delete-btn" data-id="${safeId}">Delete</button>
               </div>
             </td>
           </tr>
-        `).join('')}
+        `;
+        }).join('')}
       </tbody>
     </table>
   `;

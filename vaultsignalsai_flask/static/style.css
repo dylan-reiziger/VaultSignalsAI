@@ -934,6 +934,68 @@ main { position: relative; z-index: 1; width: min(var(--content-max), calc(100% 
   gap: .45rem;
 }
 
+.security-auth-grid {
+  display: grid;
+  gap: .8rem;
+  margin-top: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.security-auth-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  color: var(--text-soft);
+}
+
+.security-auth-grid input {
+  width: 100%;
+  border-radius: .8rem;
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
+  color: var(--text);
+  padding: .75rem .85rem;
+}
+
+.security-overview-grid {
+  margin-top: 1rem;
+  display: grid;
+  gap: .8rem;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.security-overview-card {
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  padding: .8rem .9rem;
+  background: var(--surface-inset);
+}
+
+.security-overview-card span {
+  display: block;
+  font-size: .78rem;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.security-overview-card strong {
+  display: block;
+  margin-top: .25rem;
+  font-size: 1.45rem;
+}
+
+.security-table-panel h3 {
+  margin: 0;
+  font-size: 1.35rem;
+}
+
+.security-table-caption {
+  margin-top: .45rem;
+  margin-bottom: .8rem;
+  color: var(--muted);
+}
+
 .danger-btn {
   border-color: rgba(239, 76, 76, 0.45);
   color: #ffb5b5;

@@ -293,7 +293,11 @@ function pushWebsiteAlert(message, kind = 'drop') {
   const stack = ensureAlertToastStack();
   const toast = document.createElement('article');
   toast.className = `alert-toast ${kind}`;
-  toast.innerHTML = `<strong>${kind === 'drop' ? 'Early Drop Alert' : 'Momentum Alert'}</strong><p>${message}</p>`;
+  const title = document.createElement('strong');
+  title.textContent = kind === 'drop' ? 'Early Drop Alert' : 'Momentum Alert';
+  const body = document.createElement('p');
+  body.textContent = String(message || '');
+  toast.append(title, body);
   stack.appendChild(toast);
 
   window.setTimeout(() => {
@@ -372,11 +376,16 @@ function updateTicker() {
       const change = item.change || 0;
       const changeClass = change >= 0 ? 'change-up' : 'change-down';
       const changeSymbol = change >= 0 ? '▲' : '▼';
+      const label = escapeHtml(String(item.pair || item.symbol || '--'));
+      const price = Number(item.price);
+      const priceLabel = Number.isFinite(price)
+        ? `$${price.toLocaleString('en-US', { maximumFractionDigits: 2 })}`
+        : '--';
       
       html += `
         <span>
-          <strong>${item.pair || item.symbol}</strong>
-          <span class="price">$${item.price.toLocaleString('en-US', {maximumFractionDigits: 2})}</span>
+          <strong>${label}</strong>
+          <span class="price">${priceLabel}</span>
           <span class="${changeClass}">${changeSymbol} ${Math.abs(change).toFixed(2)}%</span>
         </span>
       `;
@@ -628,13 +637,17 @@ function renderLiveDesk() {
       liveDeskCoins.innerHTML = topCoins.slice(0, 4).map((coin) => {
         const change = Number(coin.change || 0);
         const isActive = coin.id === state.liveDesk.selectedCoinId;
+        const safeCoinId = escapeHtml(String(coin.id || ''));
+        const safeSymbol = escapeHtml(String(coin.symbol || '--'));
+        const safeName = escapeHtml(String(coin.name || 'Unknown'));
+        const safeRank = Number.isFinite(Number(coin.rank)) ? String(Number(coin.rank)) : '--';
         return `
-          <button class="hero-live-coin ${isActive ? 'is-active' : ''}" type="button" data-live-coin="${coin.id}">
+          <button class="hero-live-coin ${isActive ? 'is-active' : ''}" type="button" data-live-coin="${safeCoinId}">
             <span class="hero-live-coin-head">
-              <span class="hero-live-coin-symbol">${coin.symbol}</span>
-              <span class="hero-live-coin-rank">#${coin.rank || '--'}</span>
+              <span class="hero-live-coin-symbol">${safeSymbol}</span>
+              <span class="hero-live-coin-rank">#${safeRank}</span>
             </span>
-            <span class="hero-live-coin-name">${coin.name}</span>
+            <span class="hero-live-coin-name">${safeName}</span>
             <strong class="hero-live-coin-price">${getCanvasPriceLabel(coin.price)}</strong>
             <span class="hero-live-coin-change ${change >= 0 ? 'is-up' : 'is-down'}">${formatSignedPercent(change)}</span>
           </button>
