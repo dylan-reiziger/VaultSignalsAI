@@ -8,12 +8,19 @@ VaultSignalsAI is a Windows desktop learning tool for exploring public crypto-ma
 - Labels the current market reading from observable inputs. Indicator strength is not a probability of a future move.
 - Draws a 12-hour scenario midpoint with upper and lower volatility bands from recent candle returns, realised volatility, relative volume, and an optional public sentiment source.
 - Includes a timestamped scenario report and a **Learn & risk** page that explains the educational product boundaries.
+- Lets each local profile star preferred markets and limit high-impact volatility alerts to those selected markets.
 
 ## Important boundaries
 
 VaultSignalsAI is for education and general market research. It does not provide personal investment advice, a recommendation to buy, sell, or hold an asset, or a promise of profit. Cryptoassets are high risk and users can lose all of the money they invest.
 
 Read [LEGAL-NOTICE.txt](LEGAL-NOTICE.txt) before distributing the application.
+
+## Account and notification preferences
+
+The **Account** page stores a display name, default market, starred preferred markets, alert scope, and optional Discord username/user ID plus a local tier note in the VaultSignalsAI settings file on the user's device. Turning on **Alert only on my selected markets** means only starred markets can produce local high-impact alerts. The user must explicitly opt in before their local preference says they want future Discord market updates.
+
+This beta does not connect to Discord, authenticate a Discord account, validate a subscription tier, upload personal data, or send Discord notifications. Do not treat the locally entered Discord reference or tier note as a verified identity or entitlement. A production Discord integration needs a separately hosted service with Discord OAuth, a bot, server-authoritative tier checks, consent and notification controls, secure data storage, retention/deletion handling, and an accurate privacy notice.
 
 ## Run from source
 
@@ -31,7 +38,7 @@ The repository contains a reproducible Windows packaging script. It includes the
 .\scripts\build-release.ps1 -Version "v0.1.0"
 ```
 
-Upload the complete `release/VaultSignalsAI-windows-x64.zip` archive, not only the executable. Users should extract the archive and run `VaultSignalsAI.exe`. Before public distribution, test the extracted archive on a separate Windows device and sign the executable and installer with a code-signing certificate.
+Upload the complete `release/VaultSignalsAI-windows-x64.zip` archive and its `release/VaultSignalsAI-windows-x64.zip.sha256` checksum, not only the executable. Users should extract the archive and run `VaultSignalsAI.exe`. Before public distribution, compare the ZIP's SHA-256 value with the `.sha256` file, test the extracted archive on a separate Windows device, and sign the executable and installer with a code-signing certificate.
 
 ## GitHub downloads and business review
 

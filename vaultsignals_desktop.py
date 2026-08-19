@@ -148,6 +148,9 @@ class MarketSignalApp:
         self.depth_rows = []
         self.profile_name = StringVar(value=self.user_name)
         self.profile_market = StringVar(value=self.settings["default_symbol"])
+        self.discord_contact = StringVar(value=self.settings.get("discord_contact", ""))
+        self.discord_tier = StringVar(value=self.settings.get("discord_tier", "Unverified"))
+        self.discord_market_updates_opt_in = BooleanVar(value=self.settings.get("discord_market_updates_opt_in", False))
         self.refresh_interval_choice = StringVar(value=str(self.settings["refresh_seconds"]))
         self.splash_enabled = BooleanVar(value=self.settings["show_splash"])
         self.start_fullscreen_enabled = BooleanVar(value=self.settings["start_fullscreen"])
@@ -158,6 +161,7 @@ class MarketSignalApp:
         self.alerts_enabled = BooleanVar(value=self.settings["alerts_enabled"])
         self.alert_threshold_choice = StringVar(value=str(self.settings["alert_threshold_percent"]))
         self.alert_threshold_percent = self.settings["alert_threshold_percent"]
+        self.restrict_alerts_to_favorites = BooleanVar(value=self.settings.get("restrict_alerts_to_favorites", False))
         self.scenario_overlay_enabled = BooleanVar(value=self.settings["show_scenario_overlay"])
         self.social_sentiment_url = StringVar(value=self.settings["social_sentiment_url"])
         self.release_todo_status = {
@@ -174,6 +178,9 @@ class MarketSignalApp:
         self.alert_popup = None
         self.alert_symbol = ""
         self.favorite_symbols = set(self.settings["favorite_symbols"])
+        self.favorite_market_summary = StringVar()
+        self.restrict_alerts_to_favorites.trace_add("write", self.on_alert_scope_changed)
+        self.update_favorite_market_summary()
         self.market_directory = self.fallback_markets()
         self.market_directory_loaded = False
         self.market_directory_loading = False
@@ -517,12 +524,16 @@ class MarketSignalApp:
             "favorite_symbols": [],
             "show_scenario_overlay": True,
             "social_sentiment_url": "",
+            "discord_contact": "",
+            "discord_tier": "Unverified",
+            "discord_market_updates_opt_in": False,
+            "restrict_alerts_to_favorites": False,
             "release_todo_status": {},
         }
         try:
             saved = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
-            return defaults
+            saved = {}
 
         if isinstance(saved, dict):
             defaults.update({key: value for key, value in saved.items() if key in defaults})
@@ -550,6 +561,10 @@ class MarketSignalApp:
             key: bool(defaults["release_todo_status"].get(key, False))
             for key in RELEASE_TODO_KEYS
         }
+        defaults["discord_contact"] = str(defaults.get("discord_contact", "")).strip()[:80]
+        defaults["discord_tier"] = str(defaults.get("discord_tier", "")).strip()[:40] or "Unverified"
+        defaults["discord_market_updates_opt_in"] = bool(defaults.get("discord_market_updates_opt_in", False))
+        defaults["restrict_alerts_to_favorites"] = bool(defaults.get("restrict_alerts_to_favorites", False))
         return defaults
 
     @staticmethod
@@ -865,7 +880,7 @@ class MarketSignalApp:
         self.star_market_button.pack(anchor="w", padx=18)
         Label(
             details,
-            text="Starred markets are saved on this device and always appear first. Evaluated sorts the highest-volume large moves first.",
+            text="Starred markets are saved on this device and always appear first. Turn on selected-market alerts in Account to target notifications to this list.",
             fg=MUTED,
             bg=PANEL,
             wraplength=195,
@@ -997,6 +1012,7 @@ class MarketSignalApp:
         else:
             self.favorite_symbols.add(symbol)
         self.settings["favorite_symbols"] = sorted(self.favorite_symbols)
+        self.update_favorite_market_summary()
         self.persist_settings()
         self.update_quick_market_values()
         self.render_market_results(preselect=symbol)
@@ -1017,6 +1033,21 @@ class MarketSignalApp:
             if symbol not in quick_symbols:
                 quick_symbols.append(symbol)
         self.symbol_combo.configure(values=quick_symbols)
+
+    def update_favorite_market_summary(self):
+        if not self.favorite_symbols:
+            if self.restrict_alerts_to_favorites.get():
+                self.favorite_market_summary.set("Selected-market alerts are on, but no markets are selected. Choose markets to receive alerts.")
+            else:
+                self.favorite_market_summary.set("No markets selected. Alerts currently scan all eligible markets.")
+            return
+        displayed_symbols = [self.display_symbol(symbol) for symbol in sorted(self.favorite_symbols)]
+        summary = ", ".join(displayed_symbols)
+        scope = "Only these markets can raise alerts." if self.restrict_alerts_to_favorites.get() else "Alerts still scan all eligible markets."
+        self.favorite_market_summary.set(f"Selected markets: {summary[:180]}\n{scope}")
+
+    def on_alert_scope_changed(self, *_args):
+        self.update_favorite_market_summary()
 
     @staticmethod
     def create_page_card(parent, title, subtitle):
@@ -1058,18 +1089,41 @@ class MarketSignalApp:
     def save_account_profile(self):
         name = self.profile_name.get().strip() or self.local_windows_user
         market = self.profile_market.get()
+        discord_contact = self.discord_contact.get().strip()
+        discord_tier = self.discord_tier.get().strip() or "Unverified"
+        if len(discord_contact) > 80:
+            self.account_notice.set("Keep the Discord profile reference to 80 characters or fewer.")
+            return
+        if len(discord_tier) > 40:
+            self.account_notice.set("Keep the locally recorded Discord tier to 40 characters or fewer.")
+            return
+        if self.discord_market_updates_opt_in.get() and not discord_contact:
+            self.account_notice.set("Add a Discord username or user ID before opting in to future Discord updates.")
+            return
         self.user_name = name
         self.welcome_text.set(f"Welcome, {name}")
-        self.settings["display_name"] = name
-        self.settings["default_symbol"] = market
+        self.settings.update(
+            {
+                "display_name": name,
+                "default_symbol": market,
+                "discord_contact": discord_contact,
+                "discord_tier": discord_tier,
+                "discord_market_updates_opt_in": self.discord_market_updates_opt_in.get(),
+                "restrict_alerts_to_favorites": self.restrict_alerts_to_favorites.get(),
+            }
+        )
         self.persist_settings()
-        self.account_notice.set("Profile saved on this device.")
-        self.last_update.set("Local profile saved.")
+        self.account_notice.set("Account and notification preferences saved locally. Discord delivery is not connected in this beta.")
+        self.last_update.set("Local account and market preferences saved.")
 
     def reset_account_profile(self):
         self.profile_name.set(self.local_windows_user)
         self.profile_market.set(DEFAULT_SYMBOL)
-        self.account_notice.set("Profile form reset. Select Save profile to keep these values.")
+        self.discord_contact.set("")
+        self.discord_tier.set("Unverified")
+        self.discord_market_updates_opt_in.set(False)
+        self.restrict_alerts_to_favorites.set(False)
+        self.account_notice.set("Account form reset. Your selected markets are unchanged until you edit them in Browse.")
 
     def save_settings(self):
         try:
@@ -1166,26 +1220,41 @@ class MarketSignalApp:
         self.open_market_browser()
 
     def show_account(self):
-        page = self.show_page("Account", "Manage the local VaultSignalsAI profile on this device.")
+        page = self.show_page("Account", "Manage local profile, market, and future notification preferences.")
         content = Frame(page, bg=BACKGROUND)
         content.pack(fill=BOTH, expand=True, padx=42, pady=(4, 30))
 
-        identity = self.create_page_card(content, "Local profile", "This profile stays on this device. No online account is created.")
+        identity = self.create_page_card(content, "Local profile", "Preferences stay on this device. This beta does not create an online account.")
         identity.pack(fill=X, pady=(0, 18))
         Label(identity, text=f"Windows user: {self.local_windows_user}", fg="#afbdca", bg=PANEL, font=("Segoe UI", 10)).pack(anchor="w", padx=22, pady=(2, 14))
 
-        preferences = self.create_page_card(content, "Profile preferences", "Used in the welcome message and when the application starts.")
+        preferences = self.create_page_card(content, "Account and market preferences", "Choose a default market and target high-impact alerts to selected markets.")
         preferences.pack(fill=X)
         form = Frame(preferences, bg=PANEL)
         form.pack(fill=X, padx=22, pady=(0, 14))
         self.add_form_field(form, "Display name", self.profile_name)
         self.add_form_combo(form, "Default market", self.profile_market, SYMBOL_OPTIONS)
-        self.create_button(preferences, "Save profile", self.save_account_profile, primary=True).pack(anchor="w", padx=22, pady=(0, 8))
+        self.add_form_field(form, "Discord username or user ID", self.discord_contact)
+        self.add_form_field(form, "Discord tier (local note)", self.discord_tier)
+        self.add_toggle_row(preferences, "Opt in to future Discord market updates", self.discord_market_updates_opt_in)
+        Label(
+            preferences,
+            text="The Discord reference and tier note are saved only on this device. This beta does not log in to Discord, verify a tier, upload your identity, or send Discord messages. Only a separate server-side Discord OAuth and bot service can verify tiers or choose notification delivery.",
+            fg=MUTED,
+            bg=PANEL,
+            wraplength=760,
+            justify=LEFT,
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", padx=22, pady=(0, 14))
+        Label(preferences, text="PREFERRED NOTIFICATION MARKETS", fg=MUTED, bg=PANEL, font=("Segoe UI", 8, "bold")).pack(anchor="w", padx=22, pady=(0, 5))
+        Label(preferences, textvariable=self.favorite_market_summary, fg="#bdc8d4", bg=PANEL, wraplength=760, justify=LEFT, font=("Segoe UI", 9)).pack(anchor="w", padx=22, pady=(0, 8))
+        self.add_toggle_row(preferences, "Alert only on my selected markets", self.restrict_alerts_to_favorites)
+        actions = Frame(preferences, bg=PANEL)
+        actions.pack(fill=X, padx=22, pady=(0, 8))
+        self.create_button(actions, "Choose notification markets", self.show_crypto_markets).pack(side=LEFT)
+        self.create_button(actions, "Save profile", self.save_account_profile, primary=True).pack(side=LEFT, padx=(8, 0))
+        self.create_button(actions, "Reset form", self.reset_account_profile).pack(side=LEFT, padx=(8, 0))
         Label(preferences, textvariable=self.account_notice, fg=GREEN, bg=PANEL, font=("Segoe UI", 9)).pack(anchor="w", padx=22, pady=(0, 18))
-
-        actions = self.create_page_card(content, "Profile actions", "Reset local preferences to the current Windows user and the default market.")
-        actions.pack(fill=X, pady=(18, 0))
-        self.create_button(actions, "Reset profile", self.reset_account_profile).pack(anchor="w", padx=22, pady=(0, 20))
 
     def show_scenario_report(self):
         page = self.show_page(
@@ -1597,6 +1666,7 @@ class MarketSignalApp:
         valid_symbols = {market["symbol"] for market in markets}
         self.favorite_symbols.intersection_update(valid_symbols)
         self.settings["favorite_symbols"] = sorted(self.favorite_symbols)
+        self.update_favorite_market_summary()
         self.persist_settings()
         self.update_quick_market_values()
         self.render_market_results(preselect=self.follow_symbol.get())
@@ -1659,6 +1729,8 @@ class MarketSignalApp:
 
         candidates = []
         allowed_symbols = {market["symbol"] for market in self.market_directory}
+        if self.restrict_alerts_to_favorites.get():
+            allowed_symbols.intersection_update(self.favorite_symbols)
         for symbol, metrics in self.market_metrics.items():
             if symbol not in allowed_symbols:
                 continue
