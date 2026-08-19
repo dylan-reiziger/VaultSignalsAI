@@ -1,0 +1,12 @@
+VaultSignalsAI — Educational Market-Data Notice
+
+VaultSignalsAI is an educational desktop application that displays public market data and general analytical indicators. It does not provide personal investment advice, a recommendation to buy, sell, or hold any cryptoasset, or a promise of profit.
+
+Scenario ranges, directional labels, and indicator-strength values are illustrative descriptions of current and historic inputs. They cannot predict future market movements, prices, liquidity, social-media events, or returns. Cryptoassets are high risk; their value can fall quickly and users can lose all of the money they invest.
+
+FCA status
+This application is not FCA approved or FCA authorised simply because it is downloaded, installed, distributed, or accompanied by this notice. Do not claim any FCA approval, authorisation, endorsement, or regulatory status unless it has been independently verified and is accurate for the product and promotion.
+
+Before public release in the United Kingdom, obtain qualified, current legal and compliance advice. Verify the requirements that apply to the product, pricing, subscriptions, audience, marketing, cryptoasset financial promotions, risk warnings, privacy, consumer protection, and record keeping.
+
+This notice is product guidance only and is not legal or financial advice.
