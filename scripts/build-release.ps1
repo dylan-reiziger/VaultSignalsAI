@@ -17,6 +17,7 @@ $releaseDirectory = Join-Path $projectRoot "release"
 $packageDirectory = Join-Path $releaseDirectory "VaultSignalsAI"
 $archivePath = Join-Path $releaseDirectory "VaultSignalsAI-windows-x64.zip"
 $checksumPath = "$archivePath.sha256"
+$versionAssetPath = Join-Path $projectRoot "assets\VaultSignalsAI-version.txt"
 
 if (Test-Path $archivePath) {
     Remove-Item $archivePath -Force
@@ -24,6 +25,7 @@ if (Test-Path $archivePath) {
 if (Test-Path $checksumPath) {
     Remove-Item $checksumPath -Force
 }
+Set-Content -Path $versionAssetPath -Value $Version -NoNewline -Encoding ascii
 
 & $python -m PyInstaller --noconfirm --clean --distpath $releaseDirectory VaultSignalsAI.spec
 if ($LASTEXITCODE -ne 0) {

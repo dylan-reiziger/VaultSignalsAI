@@ -50,6 +50,7 @@ SCENARIO_HORIZON_HOURS = 12
 SOCIAL_SENTIMENT_REFRESH_SECONDS = 5 * 60
 SETTINGS_PATH = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "VaultSignalsAI" / "settings.json"
 LOGO_RELATIVE_PATH = Path("assets") / "VaultSignalsAI-logo.png"
+VERSION_RELATIVE_PATH = Path("assets") / "VaultSignalsAI-version.txt"
 SPLASH_MESSAGES = [
     "Setting up the market...",
     "Building the signals...",
@@ -106,6 +107,7 @@ class MarketSignalApp:
         self.root.protocol("WM_DELETE_WINDOW", self.close_window)
         self.brand_images = []
         self.logo_image = None
+        self.app_version = self.load_app_version()
         self.load_brand_assets()
 
         self.is_fullscreen = False
@@ -357,6 +359,7 @@ class MarketSignalApp:
         status.grid(row=2, column=0, sticky="ew")
         status.grid_propagate(False)
         Label(status, textvariable=self.last_update, fg=MUTED, bg="#090c10", font=("Segoe UI", 8)).pack(side=LEFT, padx=15, pady=8)
+        Label(status, text=f"Version {self.app_version}", fg="#68737f", bg="#090c10", font=("Segoe UI", 8)).pack(side=RIGHT, padx=(0, 15), pady=8)
         Label(status, text="Market data only • Not investment advice", fg="#68737f", bg="#090c10", font=("Segoe UI", 8)).pack(side=RIGHT, padx=15, pady=8)
 
     def build_signal_panel(self):
@@ -581,6 +584,14 @@ class MarketSignalApp:
             self.root.iconphoto(True, self.logo_image)
         except Exception:
             self.logo_image = None
+
+    def load_app_version(self):
+        version_path = self.resource_path(VERSION_RELATIVE_PATH)
+        try:
+            version = version_path.read_text(encoding="utf-8").splitlines()[0].strip()
+        except (OSError, IndexError):
+            return "development"
+        return version[:40] or "development"
 
     def create_scaled_logo(self, maximum_dimension):
         if not self.logo_image:

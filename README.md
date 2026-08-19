@@ -38,7 +38,7 @@ The repository contains a reproducible Windows packaging script. It includes the
 .\scripts\build-release.ps1 -Version "v0.1.0"
 ```
 
-Upload the complete `release/VaultSignalsAI-windows-x64.zip` archive and its `release/VaultSignalsAI-windows-x64.zip.sha256` checksum, not only the executable. Users should extract the archive and run `VaultSignalsAI.exe`. Before public distribution, compare the ZIP's SHA-256 value with the `.sha256` file, test the extracted archive on a separate Windows device, and sign the executable and installer with a code-signing certificate.
+Upload the complete `release/VaultSignalsAI-windows-x64.zip` archive and its `release/VaultSignalsAI-windows-x64.zip.sha256` checksum, not only the executable. Users should extract the archive and run `VaultSignalsAI.exe`. The bottom-right footer shows the version bundled into the running application. Before public distribution, compare the ZIP's SHA-256 value with the `.sha256` file, test the extracted archive on a separate Windows device, and sign the executable and installer with a code-signing certificate.
 
 ## GitHub downloads and business review
 
