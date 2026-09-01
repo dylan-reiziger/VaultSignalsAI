@@ -282,7 +282,7 @@ class MarketSignalApp:
 
         self.live_badge = Label(
             top,
-            text="ÔùÅ LIVE",
+            text="● LIVE",
             fg=GREEN,
             bg="#090c10",
             font=("Segoe UI", 9, "bold"),
@@ -347,8 +347,8 @@ class MarketSignalApp:
         self.zoom_label = Label(toolbar, text="", fg=MUTED, bg="#090c10", font=("Segoe UI", 8))
         self.zoom_label.pack(side=RIGHT, padx=(0, 14))
         self.create_chart_button(toolbar, "Reset", self.reset_chart_zoom).pack(side=RIGHT, padx=(0, 6), pady=7)
-        self.create_chart_button(toolbar, "´╝ï", self.zoom_in).pack(side=RIGHT, padx=(0, 4), pady=7)
-        self.create_chart_button(toolbar, "´╝ì", self.zoom_out).pack(side=RIGHT, padx=(0, 4), pady=7)
+        self.create_chart_button(toolbar, "＋", self.zoom_in).pack(side=RIGHT, padx=(0, 4), pady=7)
+        self.create_chart_button(toolbar, "－", self.zoom_out).pack(side=RIGHT, padx=(0, 4), pady=7)
         self.chart_status = Label(toolbar, text="Loading candles...", fg=MUTED, bg="#090c10", font=("Segoe UI", 8))
         self.chart_status.pack(side=RIGHT, padx=(0, 14))
 
@@ -366,7 +366,7 @@ class MarketSignalApp:
         status.grid_propagate(False)
         Label(status, textvariable=self.last_update, fg=MUTED, bg="#090c10", font=("Segoe UI", 8)).pack(side=LEFT, padx=15, pady=8)
         Label(status, text=f"Version {self.app_version}", fg="#68737f", bg="#090c10", font=("Segoe UI", 8)).pack(side=RIGHT, padx=(0, 15), pady=8)
-        Label(status, text="Market data only ÔÇó Not investment advice", fg="#68737f", bg="#090c10", font=("Segoe UI", 8)).pack(side=RIGHT, padx=15, pady=8)
+        Label(status, text="Market data only • Not investment advice", fg="#68737f", bg="#090c10", font=("Segoe UI", 8)).pack(side=RIGHT, padx=15, pady=8)
 
     def build_signal_panel(self):
         panel = Frame(self.workspace, bg=PANEL, width=265, highlightbackground=BORDER, highlightthickness=1)
@@ -432,7 +432,7 @@ class MarketSignalApp:
 
         self.nav_toggle = Button(
             self.workspace,
-            text="ÔÇ║",
+            text="›",
             command=self.toggle_navigation,
             fg="#e5edf6",
             bg="#161d26",
@@ -734,7 +734,7 @@ class MarketSignalApp:
         header = Frame(self.page_overlay, bg="#090c10", height=74, highlightbackground=BORDER, highlightthickness=1)
         header.pack(fill=X)
         header.pack_propagate(False)
-        self.create_button(header, "ÔÇ╣  Crypto markets", self.show_crypto_markets).pack(side=LEFT, padx=(32, 18), pady=17)
+        self.create_button(header, "‹  Crypto markets", self.show_crypto_markets).pack(side=LEFT, padx=(32, 18), pady=17)
         header_text = Frame(header, bg="#090c10")
         header_text.pack(side=LEFT, pady=12)
         Label(header_text, text=title, fg=TEXT, bg="#090c10", font=("Segoe UI", 15, "bold")).pack(anchor="w")
@@ -819,7 +819,7 @@ class MarketSignalApp:
         self.market_search.set("")
         self.market_filter.set("EVALUATED")
         browser = self.market_browser = Toplevel(self.root)
-        browser.title("VaultSignalsAI ÔÇó Evaluated crypto markets")
+        browser.title("VaultSignalsAI • Evaluated crypto markets")
         browser.configure(bg=BACKGROUND)
         browser.geometry("1020x680")
         browser.minsize(820, 560)
@@ -957,7 +957,7 @@ class MarketSignalApp:
         self.market_list.delete(0, "end")
         selected_index = None
         for index, market in enumerate(results):
-            star = "Ôÿà" if market["symbol"] in self.favorite_symbols else " "
+            star = "★" if market["symbol"] in self.favorite_symbols else " "
             metrics = self.market_metrics.get(market["symbol"])
             if metrics:
                 movement = metrics["change"]
@@ -973,7 +973,7 @@ class MarketSignalApp:
                 selected_index = index
 
         source = "live exchange directory" if self.market_directory_loaded else "fallback list while live directory loads"
-        self.market_browser_status.set(f"{len(results)} markets shown ÔÇó {source} ÔÇó Ôÿà favourites are pinned first")
+        self.market_browser_status.set(f"{len(results)} markets shown • {source} • ★ favourites are pinned first")
         if selected_index is not None:
             self.market_list.selection_set(selected_index)
             self.market_list.see(selected_index)
@@ -1010,7 +1010,7 @@ class MarketSignalApp:
         else:
             self.market_metric_preview.configure(text="Waiting for a live evaluation snapshot.")
         starred = symbol in self.favorite_symbols
-        self.market_star_status.configure(text="Ôÿà Starred and pinned" if starred else "Not starred")
+        self.market_star_status.configure(text="★ Starred and pinned" if starred else "Not starred")
         self.star_market_button.configure(text="Remove star" if starred else "Star selected")
 
     def market_score(self, symbol):
@@ -1222,13 +1222,13 @@ class MarketSignalApp:
         if self.nav_expanded:
             self.nav.place_configure(x=0)
             self.nav_toggle.place_configure(x=211)
-            self.nav_toggle.configure(text="ÔÇ╣")
+            self.nav_toggle.configure(text="‹")
             self.nav.lift()
             self.nav_toggle.lift()
         else:
             self.nav.place_configure(x=-228)
             self.nav_toggle.place_configure(x=14)
-            self.nav_toggle.configure(text="ÔÇ║")
+            self.nav_toggle.configure(text="›")
             self.nav_toggle.lift()
 
     def show_crypto_markets(self):
@@ -1291,7 +1291,7 @@ class MarketSignalApp:
             as_of = self.scenario["as_of"].strftime("%A, %d %B %Y %H:%M:%S")
             source = self.social_sentiment_source
             if self.social_sentiment_updated_at:
-                source = f"{source} ÔÇó updated {self.social_sentiment_updated_at}"
+                source = f"{source} • updated {self.social_sentiment_updated_at}"
             detail = (
                 f"Market                 {self.display_symbol(self.active_symbol)}\n"
                 f"Calculated             {as_of}\n"
@@ -1735,7 +1735,7 @@ class MarketSignalApp:
                 elif message_type == "candles":
                     self.update_candles(data)
                 elif message_type == "error":
-                    self.live_badge.configure(text="ÔùÅ RETRYING", fg="#f3b84b")
+                    self.live_badge.configure(text="● RETRYING", fg="#f3b84b")
                     self.last_update.set("Market connection interrupted; retrying automatically.")
         except queue.Empty:
             pass
@@ -1773,14 +1773,14 @@ class MarketSignalApp:
         self.price_text.set(self.format_price(price))
         self.change_text.set(f"{change:+.2f}%")
         self.signal_text.set(direction.upper())
-        self.signal_detail.set(f"Indicator strength: {confidence}/100 ÔÇó {reason}")
+        self.signal_detail.set(f"Indicator strength: {confidence}/100 • {reason}")
         self.volume_text.set(self.format_compact_number(quote_volume))
-        self.range_text.set(f"{self.format_price(low)} ÔÇö {self.format_price(high)}")
+        self.range_text.set(f"{self.format_price(low)} — {self.format_price(high)}")
         self.momentum_text.set(f"{volume_ratio:.2f}x")
         self.trend_text.set("UPWARD" if change >= 0 else "DOWNWARD")
         self.change_text_colour(change)
-        self.live_badge.configure(text="ÔùÅ LIVE", fg=GREEN)
-        self.last_update.set(f"Last price update: {datetime.now().strftime('%H:%M:%S')}  ÔÇó  refreshes every second")
+        self.live_badge.configure(text="● LIVE", fg=GREEN)
+        self.last_update.set(f"Last price update: {datetime.now().strftime('%H:%M:%S')}  •  refreshes every second")
         self.recalculate_scenario()
         self.draw_chart()
 
@@ -1807,7 +1807,7 @@ class MarketSignalApp:
             self.recalculate_scenario()
 
     def check_high_impact_market_alerts(self):
-        """Alert on a single large, liquid public-market moveÔÇönever an asserted profit opportunity."""
+        """Alert on a single large, liquid public-market move - never an asserted profit opportunity."""
         if not self.alerts_enabled.get() or self.alert_popup:
             return
 
@@ -1837,7 +1837,7 @@ class MarketSignalApp:
     def show_high_impact_alert(self, symbol, percent_change, quote_volume, direction):
         self.alert_symbol = symbol
         alert = self.alert_popup = Toplevel(self.root)
-        alert.title("VaultSignalsAI ÔÇó High-impact movement")
+        alert.title("VaultSignalsAI • High-impact movement")
         alert.configure(bg="#0d1117")
         alert.resizable(False, False)
         alert.transient(self.root)
@@ -1854,14 +1854,14 @@ class MarketSignalApp:
         colour = GREEN if percent_change > 0 else RED
         Label(
             alert,
-            text=f"24H movement: {percent_change:+.2f}%  ÔÇó  {direction.title()} move",
+            text=f"24H movement: {percent_change:+.2f}%  •  {direction.title()} move",
             fg=colour,
             bg="#0d1117",
             font=("Segoe UI", 11, "bold"),
         ).pack(anchor="w", padx=22, pady=(6, 4))
         Label(
             alert,
-            text=f"Detected: {datetime.now().strftime('%d %b %Y  ÔÇó  %H:%M:%S')}",
+            text=f"Detected: {datetime.now().strftime('%d %b %Y  •  %H:%M:%S')}",
             fg="#8f9dab",
             bg="#0d1117",
             font=("Segoe UI", 8),
@@ -1959,7 +1959,7 @@ class MarketSignalApp:
     def update_chart_status(self):
         total = len(self.candles)
         visible = min(self.visible_candle_count, total)
-        self.chart_status.configure(text=f"1H candles ÔÇó {visible} of {total} ÔÇó mouse wheel to zoom")
+        self.chart_status.configure(text=f"1H candles • {visible} of {total} • mouse wheel to zoom")
         self.zoom_label.configure(text=f"ZOOM: {visible} candles")
 
     @staticmethod
@@ -2029,11 +2029,11 @@ class MarketSignalApp:
             "upper": final_point["upper"],
             "volatility": volatility,
         }
-        self.scenario_mid_text.set(f"{self.format_price(final_point['midpoint'])} ÔÇó 12H")
-        self.scenario_upper_text.set(f"{self.format_price(final_point['upper'])} ÔÇó 12H")
+        self.scenario_mid_text.set(f"{self.format_price(final_point['midpoint'])} • 12H")
+        self.scenario_upper_text.set(f"{self.format_price(final_point['upper'])} • 12H")
         midpoint_change = (final_point["midpoint"] / reference_price - 1) * 100
         upper_change = (final_point["upper"] / reference_price - 1) * 100
-        self.scenario_change_text.set(f"Mid {midpoint_change:+.2f}% ÔÇó upper {upper_change:+.2f}%")
+        self.scenario_change_text.set(f"Mid {midpoint_change:+.2f}% • upper {upper_change:+.2f}%")
 
     def change_text_colour(self, percent_change):
         colour = GREEN if percent_change >= 0 else RED
