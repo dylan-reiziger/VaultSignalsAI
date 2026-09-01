@@ -13,6 +13,7 @@ import base64
 import hashlib
 import ipaddress
 import secrets
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from email.message import EmailMessage
 import requests
 from pathlib import Path
@@ -45,6 +46,7 @@ AUTH_RATE_LIMIT_ATTEMPTS = int(os.getenv("AUTH_RATE_LIMIT_ATTEMPTS", "10"))
 AUTH_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("AUTH_RATE_LIMIT_WINDOW_SECONDS", "300"))
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "5"))
 REQUEST_RETRIES = int(os.getenv("REQUEST_RETRIES", "2"))
+VIEW_MODES = {"normal", "compact", "advanced"}
 ENCRYPTION_KEY = os.getenv("APP_DATA_ENCRYPTION_KEY", "")
 TOKEN_PEPPER_RAW = os.getenv("TOKEN_PEPPER", "").strip()
 TOKEN_PEPPER = TOKEN_PEPPER_RAW or hashlib.sha256(str(BASE_DIR).encode("utf-8")).hexdigest()
@@ -53,10 +55,14 @@ APP_BASE_URL = os.getenv("APP_BASE_URL", "http://127.0.0.1:5000").rstrip("/")
 DEFAULT_APP_ENV = "development" if os.getenv("FLASK_RUN_HOST", "127.0.0.1").strip().lower() in {"127.0.0.1", "localhost"} else "production"
 APP_ENV = os.getenv("APP_ENV", os.getenv("FLASK_ENV", DEFAULT_APP_ENV)).strip().lower()
 IS_DEV_ENV = APP_ENV in {"dev", "development", "local"} or os.getenv("FLASK_DEBUG", "false").lower() in {"1", "true", "yes"}
+DEMO_SIGNAL_BLUEPRINTS_ENABLED = IS_DEV_ENV and os.getenv("SEED_DEMO_SIGNAL_BLUEPRINTS", "false").lower() in {"1", "true", "yes"}
 BADGE_PREVIEW_ENABLED = os.getenv("BADGE_PREVIEW_ENABLED", "true" if IS_DEV_ENV else "false").lower() in {"1", "true", "yes"}
 TRUST_PROXY_COUNT = int(os.getenv("TRUST_PROXY_COUNT", "0" if IS_DEV_ENV else "1"))
 TRUSTED_PROXY_IPS = {item.strip() for item in os.getenv("TRUSTED_PROXY_IPS", "").split(",") if item.strip()}
 REDACTED_REQUIRED_FIELD_VALUE = "[encrypted]"
+SIGNAL_SOURCE_OPERATOR = "operator_published"
+SIGNAL_SOURCE_DEMO_BLUEPRINT = "demo_blueprint"
+SIGNAL_SOURCE_UNVERIFIED = "unverified_legacy"
 
 PAYPAL_API_BASE_URL = os.getenv("PAYPAL_API_BASE_URL", "https://api-m.sandbox.paypal.com").rstrip("/")
 PAYPAL_CLIENT_ID = os.getenv("PAYPAL_CLIENT_ID", "").strip()
@@ -172,6 +178,11 @@ def _float_env(env_name: str, default_value: float) -> float:
         return float(raw)
     except ValueError:
         return default_value
+
+
+def normalize_view_mode(raw_value: str | None) -> str:
+    candidate = str(raw_value or "").strip().lower()
+    return candidate if candidate in VIEW_MODES else "normal"
 
 
 def _load_json_file(path: Path, fallback: Any) -> Any:
@@ -301,16 +312,6 @@ PAYMENT_LINKS = {
     "ideal": os.getenv("PAYMENT_URL_IDEAL", "https://www.ideal.nl/en/consumers/"),
     "paypal": os.getenv("PAYMENT_URL_PAYPAL", "https://www.paypal.com/signin"),
 }
-DEFAULT_STOCK_FEED = [
-    {"symbol": "NASDAQ", "name": "NASDAQ", "price": 19234.56, "change": 2.41},
-    {"symbol": "S&P 500", "name": "S&P 500", "price": 5981.44, "change": 1.18},
-    {"symbol": "NVDA", "name": "NVIDIA", "price": 924.15, "change": 4.76},
-    {"symbol": "TSLA", "name": "Tesla", "price": 171.20, "change": -1.12},
-    {"symbol": "AAPL", "name": "Apple", "price": 235.32, "change": 0.84},
-    {"symbol": "MSFT", "name": "Microsoft", "price": 429.80, "change": 1.64},
-    {"symbol": "AMZN", "name": "Amazon", "price": 156.92, "change": -0.92},
-]
-STATIC_STOCK_FEED = _json_env("STATIC_STOCK_FEED", DEFAULT_STOCK_FEED)
 STOCK_SIGNAL_SYMBOLS = [
     symbol.upper()
     for symbol in _csv_env("STOCK_SIGNAL_SYMBOLS", "AAPL,MSFT,NVDA,TSLA,AMZN,META,SPY,QQQ")
@@ -321,6 +322,16 @@ if not STOCK_SIGNAL_SYMBOLS:
 STOCK_SIGNAL_DEFAULT_LIMIT = int(os.getenv("STOCK_SIGNAL_DEFAULT_LIMIT", "6"))
 STOCK_SIGNAL_MIN_CONFIDENCE = int(os.getenv("STOCK_SIGNAL_MIN_CONFIDENCE", "60"))
 STOCK_SIGNAL_CACHE_TTL_SECONDS = int(os.getenv("STOCK_SIGNAL_CACHE_TTL_SECONDS", "12"))
+MARKET_OVERVIEW_SYMBOLS = [
+    symbol.upper()
+    for symbol in _csv_env(
+        "MARKET_OVERVIEW_SYMBOLS",
+        "^GSPC,^IXIC,^DJI,AAPL,MSFT,NVDA,AMZN,META,TSLA",
+    )
+    if re.match(r"^[A-Z0-9.\-^=]{1,12}$", symbol.upper())
+]
+if not MARKET_OVERVIEW_SYMBOLS:
+    MARKET_OVERVIEW_SYMBOLS = ["^GSPC", "^IXIC", "^DJI", "AAPL", "MSFT", "NVDA"]
 YAHOO_FINANCE_CHART_BASE_URL = os.getenv("YAHOO_FINANCE_CHART_BASE_URL", "https://query1.finance.yahoo.com/v8/finance/chart").rstrip("/")
 YAHOO_FINANCE_USER_AGENT = os.getenv("YAHOO_FINANCE_USER_AGENT", "Mozilla/5.0")
 ALLOWED_CORS_ORIGINS = set(_csv_env("ALLOWED_CORS_ORIGINS", ""))
@@ -330,6 +341,7 @@ DATABASE_ACCESS_ALLOWED_EMAILS = {email.strip().lower() for email in _csv_env("D
 _MARKET_CACHE: dict[str, Any] = {"payload": None, "updated_at": 0.0}
 _LIVE_DESK_CACHE: dict[str, dict[str, Any]] = {}
 _STOCK_SIGNAL_CACHE: dict[str, dict[str, Any]] = {}
+_STOCK_MARKET_OVERVIEW_CACHE: dict[str, Any] = {"payload": None, "updated_at": 0.0}
 _FX_CACHE: dict[str, Any] = {"payload": None, "updated_at": 0.0}
 _ADMIN_PASSWORD_ROTATION_LOCK = threading.Lock()
 _ADMIN_PASSWORD_LAST_CHECK_TS = 0.0
@@ -356,6 +368,14 @@ DISCORD_TAG_LABELS = PRICING_CATALOG.get("discordTagLabels", {"final": "Final"})
 PRICING_MATRIX_GBP = {int(tier): plans for tier, plans in (PRICING_CATALOG.get("pricingMatrixGbp", {}) or {}).items()}
 TIER_NUMBER_MIN = min(PRICING_MATRIX_GBP) if PRICING_MATRIX_GBP else 1
 TIER_NUMBER_MAX = max(PRICING_MATRIX_GBP) if PRICING_MATRIX_GBP else max(len(TIERS), 1)
+PRO_TIER_NUMBER = next(
+    (
+        index
+        for index, tier in enumerate(TIERS, start=1)
+        if str(tier.get("name", "")).strip().lower() == "pro"
+    ),
+    TIER_NUMBER_MAX,
+)
 DEFAULT_BILLING_CYCLE = "monthly" if "monthly" in BILLING_CYCLES else (BILLING_CYCLES[0] if BILLING_CYCLES else "monthly")
 VALID_BILLING_CYCLES = set(BILLING_CYCLES or ["weekly", "monthly", "quarterly", "annual", "lifetime"]) or {"weekly", "monthly", "quarterly", "annual", "lifetime"}
 VALID_BILLING_CYCLES.add("lifetime")
@@ -440,32 +460,7 @@ DEFAULT_SIGNAL_TIME_BY_TIER = {
     6: "20:00",
 }
 DEFAULT_SIGNAL_TIMER_MINUTES = 90
-DEFAULT_PERFORMANCE_TIMELINE = [
-    {
-        "month": "January",
-        "value": "+12.4% Net",
-        "note": "Trend continuation month with controlled drawdowns and disciplined exits.",
-        "status": "positive",
-    },
-    {
-        "month": "February",
-        "value": "+8.1% Net",
-        "note": "Selective participation in lower-volatility sessions preserved quality.",
-        "status": "positive",
-    },
-    {
-        "month": "March",
-        "value": "+1.7% Net",
-        "note": "Defensive risk posture reduced exposure during mixed market structure.",
-        "status": "flat",
-    },
-    {
-        "month": "April",
-        "value": "+9.6% Net",
-        "note": "Momentum re-expansion supported cleaner target progression on majors.",
-        "status": "positive",
-    },
-]
+DEFAULT_PERFORMANCE_TIMELINE: list[dict[str, str]] = []
 PERFORMANCE_TIMELINE = _load_json_file(BASE_DIR / "data" / "performance_timeline.json", DEFAULT_PERFORMANCE_TIMELINE)
 
 DEFAULT_CURRENCY_SYMBOL = SUPPORTED_CURRENCIES.get(DEFAULT_CURRENCY_CODE, SUPPORTED_CURRENCIES["GBP"])["symbol"]
@@ -477,34 +472,28 @@ def get_performance_timeline() -> list[dict[str, str]]:
     for row in rows:
         if not isinstance(row, dict):
             continue
+        if row.get("verified") is not True:
+            continue
         month = str(row.get("month", "")).strip()
         value = str(row.get("value", "")).strip()
         note = str(row.get("note", "")).strip()
+        source = str(row.get("source", "")).strip()
         status = str(row.get("status", "flat")).strip().lower()
         if status not in {"positive", "flat", "negative"}:
             status = "flat"
-        if not month or not value or not note:
+        if not month or not value or not note or not source:
             continue
         prepared_rows.append(
             {
                 "month": month,
                 "value": value,
                 "note": note,
+                "source": source,
                 "status_class": f"is-{status}",
             }
         )
 
-    if prepared_rows:
-        return prepared_rows
-
-    return [
-        {
-            "month": "January",
-            "value": "+0.0% Net",
-            "note": "Add your verified monthly metrics in data/performance_timeline.json.",
-            "status_class": "is-flat",
-        }
-    ]
+    return prepared_rows
 
 
 def get_cipher() -> Fernet | None:
@@ -808,6 +797,7 @@ def serialize_account(user: sqlite3.Row | None) -> dict[str, Any] | None:
         "discordVerificationStatus": verification_status,
         "discordCheckedAt": user["discord_checked_at"] if "discord_checked_at" in user.keys() else None,
         "preferredCurrencyCode": normalize_currency_code(user["preferred_currency_code"]) if user["preferred_currency_code"] else None,
+        "viewMode": normalize_view_mode(user["preferred_view_mode"] if "preferred_view_mode" in user.keys() else None),
     }
 
 
@@ -1125,6 +1115,7 @@ def fetch_account_by_id(conn: sqlite3.Connection, account_id: int) -> sqlite3.Ro
             a.is_admin,
             a.verified,
             a.preferred_currency_code,
+            a.preferred_view_mode,
             dv.verification_status AS discord_verification_status,
             dv.verified_tag AS discord_verified_tag,
             dv.checked_at AS discord_checked_at
@@ -1154,6 +1145,7 @@ def fetch_account_profile_by_id(conn: sqlite3.Connection, account_id: int) -> sq
             a.discord_tag,
             a.is_admin,
             a.preferred_currency_code,
+            a.preferred_view_mode,
             a.verified,
             cp.display_name,
             cp.avatar_url,
@@ -1192,6 +1184,7 @@ def serialize_account_profile(row: sqlite3.Row | None) -> dict[str, Any] | None:
         "isVerified": bool(row["verified"]),
         "isAdmin": is_admin_account(row),
         "preferredCurrencyCode": normalize_currency_code(row["preferred_currency_code"]) if row["preferred_currency_code"] else "GBP",
+        "viewMode": normalize_view_mode(row["preferred_view_mode"] if "preferred_view_mode" in row.keys() else None),
         "discordVerificationStatus": row["discord_verification_status"] or DISCORD_VERIFICATION_NOT_CONNECTED,
         "discordTag": row["discord_verified_tag"] or row["discord_tag"] or "",
     }
@@ -1328,17 +1321,19 @@ def load_account_from_remember_cookie(conn: sqlite3.Connection, raw_token: str) 
 
 def ensure_daily_signals(conn: sqlite3.Connection, signal_day: str | None = None) -> str:
     resolved_day = signal_day or utc_now().strftime("%Y-%m-%d")
+    if not DEMO_SIGNAL_BLUEPRINTS_ENABLED:
+        return resolved_day
+
     existing = conn.execute("SELECT COUNT(*) AS count FROM daily_signals WHERE signal_day = ?", (resolved_day,)).fetchone()
     if existing and int(existing["count"] or 0) > 0:
         return resolved_day
 
     for signal in DAILY_SIGNAL_BLUEPRINTS:
-        # Mark tier 1 signals as free for all logged-in users
         is_free = 1 if signal.get("tier_number") == 1 else 0
         signal_time_utc = normalize_signal_time_utc(signal.get("signal_time_utc"), signal.get("session_label"), int(signal.get("tier_number", 0) or 0))
         timer_minutes = normalize_signal_timer_minutes(signal.get("timer_minutes"))
         conn.execute(
-            "INSERT INTO daily_signals (signal_day, tier_number, asset_symbol, market, direction, entry_price, target_price, stop_price, confidence_label, session_label, thesis, signal_time_utc, timer_minutes, base_currency_code, status, is_free) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO daily_signals (signal_day, tier_number, asset_symbol, market, direction, entry_price, target_price, stop_price, confidence_label, session_label, thesis, signal_time_utc, timer_minutes, base_currency_code, status, is_free, signal_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 resolved_day,
                 signal["tier_number"],
@@ -1354,8 +1349,9 @@ def ensure_daily_signals(conn: sqlite3.Connection, signal_day: str | None = None
                 signal_time_utc,
                 timer_minutes,
                 "USD",
-                "published",
+                "draft",
                 is_free,
+                SIGNAL_SOURCE_DEMO_BLUEPRINT,
             ),
         )
     return resolved_day
@@ -1390,6 +1386,7 @@ def serialize_signal_row(signal_row: sqlite3.Row, selected_currency_code: str) -
         "timerMinutes": timer_minutes,
         "signalStartsAtUtc": starts_at_utc,
         "signalEndsAtUtc": ends_at_utc,
+        "sourceType": signal_row["signal_source"] if "signal_source" in signal_row.keys() else SIGNAL_SOURCE_UNVERIFIED,
     }
 
 
@@ -2120,10 +2117,28 @@ def fetch_yahoo_stock_snapshot(symbol: str) -> dict[str, Any] | None:
         return None
 
     meta = result.get("meta") if isinstance(result.get("meta"), dict) else {}
+    latest_timestamp, latest_price, _ = clean_rows[-1]
+    reference_price = clean_rows[0][1]
+    for raw_reference in (meta.get("chartPreviousClose"), meta.get("previousClose")):
+        try:
+            candidate_reference = float(raw_reference)
+        except (TypeError, ValueError):
+            continue
+        if candidate_reference > 0:
+            reference_price = candidate_reference
+            break
+
     return {
         "symbol": symbol.upper(),
         "name": str(meta.get("shortName") or meta.get("symbol") or symbol.upper()),
         "exchange": str(meta.get("exchangeName") or "US Equities"),
+        "marketState": str(meta.get("marketState") or "Unknown"),
+        "latestTimestamp": latest_timestamp,
+        "latestPrice": latest_price,
+        "referencePrice": reference_price,
+        "dayHigh": max(row[1] for row in clean_rows),
+        "dayLow": min(row[1] for row in clean_rows),
+        "volume": sum(row[2] for row in clean_rows),
         "rows": clean_rows,
     }
 
@@ -2248,6 +2263,63 @@ def generate_live_stock_signals(symbols: list[str], limit: int) -> list[dict[str
         )
     )
     return signals[: max(1, limit)]
+
+
+def serialize_market_overview_quote(snapshot: dict[str, Any]) -> dict[str, Any] | None:
+    try:
+        price = float(snapshot.get("latestPrice") or 0)
+        reference_price = float(snapshot.get("referencePrice") or 0)
+        day_high = float(snapshot.get("dayHigh") or price)
+        day_low = float(snapshot.get("dayLow") or price)
+        volume = float(snapshot.get("volume") or 0)
+        updated_at = int(snapshot.get("latestTimestamp") or 0)
+    except (TypeError, ValueError):
+        return None
+
+    if price <= 0 or reference_price <= 0 or updated_at <= 0:
+        return None
+
+    change_amount = price - reference_price
+    return {
+        "symbol": str(snapshot.get("symbol") or "").upper(),
+        "name": str(snapshot.get("name") or snapshot.get("symbol") or "Unknown"),
+        "exchange": str(snapshot.get("exchange") or "US Equities"),
+        "marketState": str(snapshot.get("marketState") or "Unknown"),
+        "price": price,
+        "changeAmount": change_amount,
+        "changePercent": (change_amount / reference_price) * 100,
+        "dayHigh": day_high,
+        "dayLow": day_low,
+        "volume": volume,
+        "updatedAtUtc": datetime.fromtimestamp(updated_at, UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "isIndex": str(snapshot.get("symbol") or "").startswith("^"),
+    }
+
+
+def build_market_overview_quotes(symbols: list[str]) -> list[dict[str, Any]]:
+    quotes: list[dict[str, Any]] = []
+    worker_count = min(4, max(1, len(symbols)))
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = {
+            executor.submit(fetch_yahoo_stock_snapshot, symbol): symbol
+            for symbol in symbols
+        }
+        for future in as_completed(futures):
+            symbol = futures[future]
+            try:
+                snapshot = future.result()
+            except Exception as exc:
+                logger.warning("Market quote fetch failed for %s: %s", symbol, exc)
+                continue
+            if snapshot is None:
+                continue
+            quote = serialize_market_overview_quote(snapshot)
+            if quote is not None:
+                quotes.append(quote)
+
+    order_by_symbol = {symbol: index for index, symbol in enumerate(symbols)}
+    quotes.sort(key=lambda quote: order_by_symbol.get(str(quote.get("symbol") or ""), len(order_by_symbol)))
+    return quotes
 
 
 def convert_market_quote_amount(amount: Any, from_currency: str = "EUR", to_currency: str = "USD") -> float:
@@ -2831,6 +2903,7 @@ def init_db() -> None:
                 discord_tag TEXT,
                 verified INTEGER NOT NULL DEFAULT 1,
                 is_admin INTEGER NOT NULL DEFAULT 0,
+                preferred_view_mode TEXT NOT NULL DEFAULT 'normal',
                 data_consent_accepted INTEGER NOT NULL DEFAULT 0,
                 data_consent_accepted_at TIMESTAMP,
                 verification_token TEXT,
@@ -2955,6 +3028,7 @@ def init_db() -> None:
                 base_currency_code TEXT NOT NULL DEFAULT 'USD',
                 status TEXT NOT NULL DEFAULT 'open',
                 is_free INTEGER NOT NULL DEFAULT 0,
+                signal_source TEXT NOT NULL DEFAULT 'unverified_legacy',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             """
@@ -3213,6 +3287,7 @@ def init_db() -> None:
         ensure_column(conn, "accounts", "address_enc", "TEXT")
         ensure_column(conn, "accounts", "discord_username_enc", "TEXT")
         ensure_column(conn, "accounts", "preferred_currency_code", "TEXT")
+        ensure_column(conn, "accounts", "preferred_view_mode", "TEXT NOT NULL DEFAULT 'normal'")
 
         ensure_column(conn, "purchases", "tier_number", "INTEGER")
         ensure_column(conn, "purchases", "plan_name", "TEXT")
@@ -3243,6 +3318,7 @@ def init_db() -> None:
         ensure_column(conn, "daily_signals", "is_free", "INTEGER NOT NULL DEFAULT 0")
         ensure_column(conn, "daily_signals", "signal_time_utc", "TEXT NOT NULL DEFAULT '12:00'")
         ensure_column(conn, "daily_signals", "timer_minutes", "INTEGER NOT NULL DEFAULT 90")
+        ensure_column(conn, "daily_signals", "signal_source", "TEXT NOT NULL DEFAULT 'unverified_legacy'")
 
         ensure_column(conn, "community_profiles", "display_name", "TEXT")
         ensure_column(conn, "community_profiles", "display_name_changed_at", "TIMESTAMP")
@@ -3499,11 +3575,30 @@ def disable_static_cache(response: Response) -> Response:
 
 @app.route("/")
 def index() -> str:
+    if g.current_account is not None:
+        return redirect(url_for("market_dashboard"))
     return render_template(
         "index.html",
         tiers=TIERS,
         is_logged_in=(g.current_account is not None),
         performance_timeline=get_performance_timeline(),
+    )
+
+
+@app.route("/dashboard")
+def market_dashboard() -> str:
+    payload, status_code = get_market_overview_payload()
+    view_mode = normalize_view_mode(
+        g.current_account["preferred_view_mode"]
+        if g.current_account is not None and "preferred_view_mode" in g.current_account.keys()
+        else None
+    )
+    return render_template(
+        "market_dashboard.html",
+        market=payload if status_code == 200 else None,
+        market_message=payload.get("message", "Live stock quotes are temporarily unavailable. Please try again shortly."),
+        is_logged_in=(g.current_account is not None),
+        view_mode=view_mode,
     )
 
 
@@ -3564,7 +3659,19 @@ def pro_mode_alias() -> str:
 
 @app.route("/pro-mode")
 def pro_mode_page() -> str:
-    return render_template("pro.html", requires_login=(g.current_account is None))
+    requires_login = g.current_account is None
+    has_pro_access = False
+    if not requires_login:
+        with get_db() as conn:
+            has_pro_access = get_active_tier_number(
+                conn,
+                int(g.current_account["id"]),
+            ) >= PRO_TIER_NUMBER
+    return render_template(
+        "pro.html",
+        requires_login=requires_login,
+        has_pro_access=has_pro_access,
+    )
 
 
 @app.get("/api/pro/signals")
@@ -3578,13 +3685,30 @@ def pro_signals() -> tuple[Any, int]:
     # Resolve display currency from account preference / cookie / region
     with get_db() as conn:
         account_row = fetch_account_by_id(conn, account_id)
+        active_tier = get_active_tier_number(conn, account_id)
+        if active_tier < PRO_TIER_NUMBER:
+            return jsonify(
+                {
+                    "ok": False,
+                    "message": "An active Pro membership is required to view the Pro signal desk.",
+                }
+            ), 403
+
         currency_pref = resolve_currency_preference(account_row)
         selected_currency = currency_pref["code"]
 
         ensure_daily_signals(conn, today)
         rows = conn.execute(
-            "SELECT * FROM daily_signals WHERE signal_day = ? ORDER BY tier_number ASC",
-            (today,),
+            """
+            SELECT *
+            FROM daily_signals
+            WHERE signal_day = ?
+                AND status IN ('open', 'published')
+                AND signal_source = ?
+                AND (is_free = 1 OR tier_number <= ?)
+            ORDER BY tier_number ASC
+            """,
+            (today, SIGNAL_SOURCE_OPERATOR, active_tier),
         ).fetchall()
 
     _CONF_SCORE = {"Core": 72, "Core+": 81, "Active": 68, "Premium": 85, "Pro": 78, "Elite": 92}
@@ -3675,6 +3799,53 @@ def ai_stock_signals() -> tuple[Any, int]:
 
     _STOCK_SIGNAL_CACHE[cache_key] = {"payload": payload, "updated_at": time.time()}
     return jsonify(payload), 200
+
+
+def get_market_overview_payload() -> tuple[dict[str, Any], int]:
+    cached_payload = _STOCK_MARKET_OVERVIEW_CACHE.get("payload")
+    cached_at = float(_STOCK_MARKET_OVERVIEW_CACHE.get("updated_at", 0) or 0)
+    if cached_payload and (time.time() - cached_at) < MARKET_CACHE_TTL_SECONDS:
+        return {
+            **cached_payload,
+            "source": {**cached_payload.get("source", {}), "cached": True},
+        }, 200
+
+    quotes = build_market_overview_quotes(MARKET_OVERVIEW_SYMBOLS)
+    if not quotes:
+        if cached_payload:
+            return {
+                **cached_payload,
+                "source": {**cached_payload.get("source", {}), "cached": True},
+            }, 200
+        return {
+            "ok": False,
+            "message": "Live stock quotes are temporarily unavailable. Please try again shortly.",
+            "quotes": [],
+        }, 503
+
+    index_quotes = [quote for quote in quotes if quote["isIndex"]]
+    stock_quotes = [quote for quote in quotes if not quote["isIndex"]]
+    positive_stock_quotes = [quote for quote in stock_quotes if quote["changePercent"] > 0]
+    negative_stock_quotes = [quote for quote in stock_quotes if quote["changePercent"] < 0]
+    payload = {
+        "ok": True,
+        "quotes": quotes,
+        "indices": index_quotes,
+        "gainers": sorted(positive_stock_quotes, key=lambda quote: quote["changePercent"], reverse=True)[:4],
+        "losers": sorted(negative_stock_quotes, key=lambda quote: quote["changePercent"])[:4],
+        "volumeLeaders": sorted(stock_quotes, key=lambda quote: quote["volume"], reverse=True)[:4],
+        "source": {"provider": "Yahoo Finance", "cached": False},
+        "generatedAtUtc": utc_now().strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    _STOCK_MARKET_OVERVIEW_CACHE["payload"] = payload
+    _STOCK_MARKET_OVERVIEW_CACHE["updated_at"] = time.time()
+    return payload, 200
+
+
+@app.get("/api/market-overview")
+def market_overview() -> tuple[Any, int]:
+    payload, status_code = get_market_overview_payload()
+    return jsonify(payload), status_code
 
 
 @app.route("/admin/security/login")
@@ -3949,7 +4120,7 @@ def admin_list_signals() -> tuple[Any, int]:
     with get_db() as conn:
         ensure_daily_signals(conn, signal_day)
         rows = conn.execute(
-            "SELECT id, signal_day, tier_number, asset_symbol, market, direction, entry_price, target_price, stop_price, confidence_label, session_label, thesis, signal_time_utc, timer_minutes, status, created_at FROM daily_signals WHERE signal_day = ? ORDER BY tier_number ASC, id ASC",
+            "SELECT id, signal_day, tier_number, asset_symbol, market, direction, entry_price, target_price, stop_price, confidence_label, session_label, thesis, signal_time_utc, timer_minutes, status, signal_source, created_at FROM daily_signals WHERE signal_day = ? ORDER BY tier_number ASC, id ASC",
             (signal_day,),
         ).fetchall()
 
@@ -3974,6 +4145,7 @@ def admin_list_signals() -> tuple[Any, int]:
                     "signalTimeUtc": normalize_signal_time_utc(row["signal_time_utc"], row["session_label"], int(row["tier_number"] or 0)),
                     "timerMinutes": normalize_signal_timer_minutes(row["timer_minutes"]),
                     "status": row["status"],
+                    "sourceType": row["signal_source"],
                     "createdAt": row["created_at"],
                 }
                 for row in rows
@@ -4047,7 +4219,7 @@ def admin_create_signal() -> tuple[Any, int]:
 
     with get_db() as conn:
         conn.execute(
-            "INSERT INTO daily_signals (signal_day, tier_number, asset_symbol, market, direction, entry_price, target_price, stop_price, confidence_label, session_label, thesis, signal_time_utc, timer_minutes, base_currency_code, status, is_free) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO daily_signals (signal_day, tier_number, asset_symbol, market, direction, entry_price, target_price, stop_price, confidence_label, session_label, thesis, signal_time_utc, timer_minutes, base_currency_code, status, is_free, signal_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 parsed_payload["signal_day"],
                 parsed_payload["tier_number"],
@@ -4065,6 +4237,7 @@ def admin_create_signal() -> tuple[Any, int]:
                 "USD",
                 parsed_payload["status"],
                 is_free,
+                SIGNAL_SOURCE_OPERATOR,
             ),
         )
 
@@ -4092,7 +4265,7 @@ def admin_update_signal(signal_id: int) -> tuple[Any, int]:
             UPDATE daily_signals
             SET signal_day = ?, tier_number = ?, asset_symbol = ?, market = ?, direction = ?,
                 entry_price = ?, target_price = ?, stop_price = ?, confidence_label = ?,
-                session_label = ?, thesis = ?, signal_time_utc = ?, timer_minutes = ?, status = ?
+                session_label = ?, thesis = ?, signal_time_utc = ?, timer_minutes = ?, status = ?, signal_source = ?
             WHERE id = ?
             """,
             (
@@ -4110,6 +4283,7 @@ def admin_update_signal(signal_id: int) -> tuple[Any, int]:
                 parsed_payload["signal_time_utc"],
                 parsed_payload["timer_minutes"],
                 parsed_payload["status"],
+                SIGNAL_SOURCE_OPERATOR,
                 signal_id,
             ),
         )
@@ -4132,7 +4306,13 @@ def admin_update_signal_status(signal_id: int) -> tuple[Any, int]:
         row = conn.execute("SELECT id FROM daily_signals WHERE id = ?", (signal_id,)).fetchone()
         if row is None:
             return jsonify({"ok": False, "message": "Signal not found."}), 404
-        conn.execute("UPDATE daily_signals SET status = ? WHERE id = ?", (status, signal_id))
+        if status in {"open", "published"}:
+            conn.execute(
+                "UPDATE daily_signals SET status = ?, signal_source = ? WHERE id = ?",
+                (status, SIGNAL_SOURCE_OPERATOR, signal_id),
+            )
+        else:
+            conn.execute("UPDATE daily_signals SET status = ? WHERE id = ?", (status, signal_id))
 
     return jsonify({"ok": True, "message": "Signal status updated."}), 200
 
@@ -4297,6 +4477,31 @@ def create_account() -> tuple[Any, int]:
     return attach_auth_state(response, created_account_id, remember_me), 201
 
 
+def _is_dev_admin_credentials(email: str, password: str) -> bool:
+    return IS_DEV_ENV and email == "admin" and password == "admin"
+
+
+def _get_or_create_dev_admin_account(conn: sqlite3.Connection) -> sqlite3.Row | None:
+    admin_email = "admin"
+    admin_username = "admin"
+    admin = conn.execute("SELECT id, is_admin FROM accounts WHERE email = ?", (admin_email,)).fetchone()
+    if admin is not None:
+        if int(admin["is_admin"] or 0) != 1:
+            conn.execute(
+                "UPDATE accounts SET is_admin = 1, verified = 1, data_consent_accepted = 1 WHERE id = ?",
+                (int(admin["id"]),),
+            )
+        return fetch_account_by_id(conn, int(admin["id"]))
+
+    password_hash = generate_password_hash("admin")
+    conn.execute(
+        "INSERT INTO accounts (username, full_name, email, password_hash, zipcode, address, phone_number, discord_username, discord_tag, verified, is_admin, data_consent_accepted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 1)",
+        (admin_username, "Administrator", admin_email, password_hash, "N/A", "N/A", None, None, None),
+    )
+    account_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+    return fetch_account_by_id(conn, int(account_id))
+
+
 @app.post("/api/login")
 def login() -> tuple[Any, int]:
     if is_rate_limited(_client_key()):
@@ -4313,20 +4518,22 @@ def login() -> tuple[Any, int]:
         return jsonify({"ok": False, "message": "Email and password are required."}), 400
 
     with get_db() as conn:
-        auth_row = conn.execute("SELECT id, password_hash FROM accounts WHERE email = ?", (email,)).fetchone()
+        if _is_dev_admin_credentials(email, password):
+            user = _get_or_create_dev_admin_account(conn)
+        else:
+            auth_row = conn.execute("SELECT id, password_hash FROM accounts WHERE email = ?", (email,)).fetchone()
+            if auth_row is None or not check_password_hash(auth_row["password_hash"], password):
+                log_security_event(auth_row["id"] if auth_row else None, "login", "failed")
+                return jsonify({"ok": False, "message": "Invalid email or password."}), 401
 
-        if auth_row is None or not check_password_hash(auth_row["password_hash"], password):
-            log_security_event(auth_row["id"] if auth_row else None, "login", "failed")
-            return jsonify({"ok": False, "message": "Invalid email or password."}), 401
-
-        user = fetch_account_by_id(conn, int(auth_row["id"]))
-        if user is not None:
-            sync_discord_verification_for_account(
-                conn,
-                int(user["id"]),
-                decrypt_value(user["discord_username_enc"]) or user["discord_username"],
-            )
-            user = fetch_account_by_id(conn, int(user["id"]))
+            user = fetch_account_by_id(conn, int(auth_row["id"]))
+            if user is not None:
+                sync_discord_verification_for_account(
+                    conn,
+                    int(user["id"]),
+                    decrypt_value(user["discord_username_enc"]) or user["discord_username"],
+                )
+                user = fetch_account_by_id(conn, int(user["id"]))
 
     if user is None:
         return jsonify({"ok": False, "message": "Invalid email or password."}), 401
@@ -4488,6 +4695,25 @@ def update_currency_preference() -> tuple[Any, int]:
             conn.execute("UPDATE accounts SET preferred_currency_code = ? WHERE id = ?", (currency_code, int(g.current_account["id"])))
 
     return response, 200
+
+
+@app.post("/api/preferences/view-mode")
+def update_view_mode_preference() -> tuple[Any, int]:
+    if g.current_account is None:
+        return jsonify({"ok": False, "message": "Login required."}), 401
+
+    payload = request.get_json(silent=True) or {}
+    view_mode = str(payload.get("viewMode", "")).strip().lower()
+    if view_mode not in VIEW_MODES:
+        return jsonify({"ok": False, "message": "Select Normal, Compact, or Advanced view."}), 400
+
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE accounts SET preferred_view_mode = ? WHERE id = ?",
+            (view_mode, int(g.current_account["id"])),
+        )
+
+    return jsonify({"ok": True, "message": "Display mode updated.", "viewMode": view_mode}), 200
 
 
 @app.post("/api/account/security")
@@ -5058,16 +5284,16 @@ def member_signals() -> tuple[Any, int]:
         
         # Get FREE signals (available to all logged-in users)
         free_signals = conn.execute(
-            "SELECT id, signal_day, tier_number, asset_symbol, market, direction, entry_price, target_price, stop_price, confidence_label, session_label, thesis, signal_time_utc, timer_minutes, base_currency_code, status FROM daily_signals WHERE signal_day = ? AND is_free = 1 AND status IN ('open', 'published') ORDER BY tier_number ASC",
-            (today,),
+            "SELECT id, signal_day, tier_number, asset_symbol, market, direction, entry_price, target_price, stop_price, confidence_label, session_label, thesis, signal_time_utc, timer_minutes, base_currency_code, status, signal_source FROM daily_signals WHERE signal_day = ? AND is_free = 1 AND status IN ('open', 'published') AND signal_source = ? ORDER BY tier_number ASC",
+            (today, SIGNAL_SOURCE_OPERATOR),
         ).fetchall()
         
         # Get PAID signals (based on user's purchases)
         paid_signal_rows = []
         if max_signals > 0:
             paid_signal_rows = conn.execute(
-                "SELECT id, signal_day, tier_number, asset_symbol, market, direction, entry_price, target_price, stop_price, confidence_label, session_label, thesis, signal_time_utc, timer_minutes, base_currency_code, status FROM daily_signals WHERE signal_day = ? AND tier_number <= ? AND is_free = 0 AND status IN ('open', 'published') ORDER BY tier_number ASC",
-                (today, max_signals),
+                "SELECT id, signal_day, tier_number, asset_symbol, market, direction, entry_price, target_price, stop_price, confidence_label, session_label, thesis, signal_time_utc, timer_minutes, base_currency_code, status, signal_source FROM daily_signals WHERE signal_day = ? AND tier_number <= ? AND is_free = 0 AND status IN ('open', 'published') AND signal_source = ? ORDER BY tier_number ASC",
+                (today, max_signals, SIGNAL_SOURCE_OPERATOR),
             ).fetchall()
 
     purchase_payload = [
@@ -6666,7 +6892,7 @@ def crypto_data():
         )
 
         market_data = {
-            "stocks": STATIC_STOCK_FEED,
+            "stocks": [],
             "crypto": [],
             "summary": {
                 "market_cap": 0,

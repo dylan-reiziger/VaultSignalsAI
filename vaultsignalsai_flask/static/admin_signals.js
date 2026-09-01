@@ -119,7 +119,7 @@ function renderAdminSignalsTable(signals) {
     <table>
       <thead>
         <tr>
-          <th>ID</th><th>Tier</th><th>Asset</th><th>Dir</th><th>Time UTC</th><th>Timer</th><th>Entry</th><th>Target</th><th>Stop</th><th>Status</th><th>Actions</th>
+          <th>ID</th><th>Tier</th><th>Asset</th><th>Dir</th><th>Time UTC</th><th>Timer</th><th>Entry</th><th>Target</th><th>Stop</th><th>Source</th><th>Status</th><th>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -134,6 +134,12 @@ function renderAdminSignalsTable(signals) {
           const safeTarget = escapeHtml(signal.targetPrice);
           const safeStop = escapeHtml(signal.stopPrice);
           const safeStatus = escapeHtml(signal.status);
+          const sourceLabels = {
+            operator_published: 'Operator approved',
+            demo_blueprint: 'Development demo',
+            unverified_legacy: 'Unverified legacy',
+          };
+          const safeSource = escapeHtml(sourceLabels[signal.sourceType] || 'Unknown source');
           const nextStatus = signal.status === 'published' ? 'draft' : 'published';
           const safeNextStatus = escapeHtml(nextStatus);
           return `
@@ -147,6 +153,7 @@ function renderAdminSignalsTable(signals) {
             <td>${safeEntry}</td>
             <td>${safeTarget}</td>
             <td>${safeStop}</td>
+            <td>${safeSource}</td>
             <td>${safeStatus}</td>
             <td>
               <div class="admin-table-actions">

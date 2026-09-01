@@ -7,7 +7,7 @@
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='vaultsignals-logo.png') }}" />
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
   </head>
-  <body data-page-loader="intro" data-vat-rate="{{ ui_config.vat_rate }}" data-currency-symbol="{{ ui_config.currency_symbol }}" data-default-currency-code="{{ ui_config.default_currency_code }}" data-bitvavo-url="{{ ui_config.bitvavo_url }}" data-requires-login="{{ 'true' if requires_login else 'false' }}">
+  <body data-page-loader="intro" data-vat-rate="{{ ui_config.vat_rate }}" data-currency-symbol="{{ ui_config.currency_symbol }}" data-default-currency-code="{{ ui_config.default_currency_code }}" data-bitvavo-url="{{ ui_config.bitvavo_url }}" data-requires-login="{{ 'true' if requires_login else 'false' }}" data-has-pro-access="{{ 'true' if has_pro_access else 'false' }}">
     {% include 'sections/page_loader.html' %}
     <canvas id="marketCanvas"></canvas>
     <div class="site-shell">
@@ -57,6 +57,20 @@
               <div class="pro-login-guard-actions">
                 <button class="primary-btn" data-login-trigger type="button">Log In To Open Pro Mode</button>
                 <a class="ghost-btn" href="/your-signals">Go to Your Signals</a>
+              </div>
+            </div>
+          </div>
+        </section>
+        {% elif not has_pro_access %}
+        <section class="pro-login-guard-shell">
+          <div class="pro-signals-shell">
+            <div class="pro-login-guard-card">
+              <span class="pro-ai-badge-pill">Pro Access</span>
+              <h1 class="pro-hero-title">Your Pro desk is not active yet</h1>
+              <p class="pro-hero-sub">Your account can still use the market workspace and the 12-hour scenario. An active Pro membership unlocks the extended desk and the signals included with your current plan.</p>
+              <div class="pro-login-guard-actions">
+                <a class="primary-btn" href="/price">Compare memberships</a>
+                <a class="ghost-btn" href="/your-signals">Open your signals</a>
               </div>
             </div>
           </div>
@@ -305,6 +319,7 @@
 
       const bitvavo_url = document.body.dataset.bitvavoUrl || 'https://bitvavo.com/en';
       const proRequiresLogin = document.body.dataset.requiresLogin === 'true';
+      const proHasAccess = document.body.dataset.hasProAccess === 'true';
       const proState = {
         signals: [],
         displayCurrency: document.body.dataset.defaultCurrencyCode || 'GBP',
@@ -1220,7 +1235,7 @@
       }
 
       document.addEventListener('DOMContentLoaded', () => {
-        if (proRequiresLogin) {
+        if (proRequiresLogin || !proHasAccess) {
           return;
         }
 

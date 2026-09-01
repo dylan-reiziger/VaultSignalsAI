@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     address_enc TEXT,
     discord_username_enc TEXT,
     preferred_currency_code TEXT,
+    preferred_view_mode TEXT NOT NULL DEFAULT 'normal',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

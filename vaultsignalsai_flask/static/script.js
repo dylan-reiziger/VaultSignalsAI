@@ -946,6 +946,11 @@ function populateCurrencySelectors() {
   });
 }
 
+function applyViewMode(viewMode) {
+  const normalized = ['normal', 'compact', 'advanced'].includes(viewMode) ? viewMode : 'normal';
+  document.body.dataset.viewMode = normalized;
+}
+
 function applyBootstrapData(payload) {
   state.member = payload.user || null;
   state.currencies = payload.currencies || [];
@@ -953,6 +958,7 @@ function applyBootstrapData(payload) {
   state.pricingMatrixGbp = payload.pricingMatrixGbp || PRICING_MATRIX_GBP;
   state.promoPlansGbp = payload.promoPlansGbp || DEFAULT_PROMO_PLANS_GBP;
   state.activeCurrency = payload.currency || getActiveCurrency();
+  applyViewMode(state.member?.viewMode || 'normal');
   populateCurrencySelectors();
   updateMemberStatus();
   updateMemberActions();
@@ -1668,20 +1674,66 @@ function setPageSection(targetId, shouldScroll = true) {
   }
 }
 
-function revealOnScroll() {
-  const sections = document.querySelectorAll('section');
-  const revealPoint = window.innerHeight * 0.85;
-
-  sections.forEach((section) => {
-    const rect = section.getBoundingClientRect();
-    if (rect.top < revealPoint) {
-      section.classList.add('visible');
-    }
+function markRevealItems(selector, stepDelay = 55, maxDelay = 280) {
+  const nodes = document.querySelectorAll(selector);
+  nodes.forEach((node, index) => {
+    const delayMs = Math.min(index * stepDelay, maxDelay);
+    node.classList.add('reveal-item');
+    node.style.setProperty('--reveal-delay', `${delayMs}ms`);
   });
 }
 
-window.addEventListener('scroll', revealOnScroll);
-window.addEventListener('load', revealOnScroll);
+function initRevealMotion() {
+  const sections = Array.from(document.querySelectorAll('section'));
+
+  markRevealItems('.pricing-page-hero', 0, 0);
+  markRevealItems('.hero-spotlight', 0, 0);
+  markRevealItems('.hero-proof-list li', 50, 180);
+  markRevealItems('.feature-grid > article', 65, 230);
+  markRevealItems('.split-section > article', 95, 240);
+  markRevealItems('.pricing-grid > article', 80, 220);
+  markRevealItems('.tier-cube-grid > article', 52, 280);
+  markRevealItems('.price-trust-bar > span', 45, 180);
+  markRevealItems('.banner-card', 0, 0);
+
+  const extraRevealItems = Array.from(document.querySelectorAll('.reveal-item'));
+  const revealTargets = [...new Set([...sections, ...extraRevealItems])];
+  if (!revealTargets.length) {
+    return;
+  }
+
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduceMotion || typeof IntersectionObserver !== 'function') {
+    revealTargets.forEach((target) => {
+      if (target.classList.contains('section')) {
+        target.classList.add('visible');
+      }
+      target.classList.add('is-visible');
+    });
+    return;
+  }
+
+  const observer = new IntersectionObserver((entries, currentObserver) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) {
+        return;
+      }
+
+      const target = entry.target;
+      if (target.classList.contains('section')) {
+        target.classList.add('visible');
+      }
+      target.classList.add('is-visible');
+      currentObserver.unobserve(target);
+    });
+  }, {
+    root: null,
+    threshold: 0.16,
+    rootMargin: '0px 0px -10% 0px',
+  });
+
+  revealTargets.forEach((target) => observer.observe(target));
+}
 
 async function handleAuthSubmit(event) {
   event.preventDefault();
@@ -1762,6 +1814,7 @@ async function handleAuthSubmit(event) {
     populateCurrencySelectors();
     setPricingMode(switchBusiness?.classList.contains('active') ? 'business' : 'personal');
     await loadMemberSignals();
+    window.location.assign('/dashboard');
 
   } catch (error) {
     const runningOnFlaskLocalhost = window.location.protocol === 'http:' && (window.location.host === '127.0.0.1:5000' || window.location.host === 'localhost:5000');
@@ -2001,8 +2054,29 @@ async function handleTierClick(event) {
 }
 
 function initMenu() {
-  menuToggle?.addEventListener('click', () => {
-    navLinks.classList.toggle('hidden');
+  if (!menuToggle || !navLinks) return;
+  menuToggle.setAttribute('aria-expanded', 'false');
+
+  const closeMenu = () => {
+    navLinks.classList.remove('open');
+    menuToggle.setAttribute('aria-expanded', 'false');
+  };
+
+  menuToggle.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const isOpen = navLinks.classList.toggle('open');
+    menuToggle.setAttribute('aria-expanded', String(isOpen));
+  });
+
+  navLinks.querySelectorAll('a').forEach((link) => {
+    link.addEventListener('click', closeMenu);
+  });
+
+  document.addEventListener('click', (event) => {
+    if (!navLinks.classList.contains('open')) return;
+    if (!event.target.closest('.navbar')) {
+      closeMenu();
+    }
   });
 }
 
@@ -2215,6 +2289,8 @@ function setupPage() {
     initParticles();
     window.requestAnimationFrame(drawBackgroundAnimation);
   }
+
+  initRevealMotion();
 
   initMenu();
 

@@ -168,6 +168,14 @@
               </div>
               <div class="settings-section-grid">
                 <label>
+                  <span>Interface Mode</span>
+                  <select id="settingsViewMode">
+                    <option value="normal">Normal</option>
+                    <option value="compact">Compact</option>
+                    <option value="advanced">Advanced</option>
+                  </select>
+                </label>
+                <label>
                   <span>Layout Style</span>
                   <select id="settingsLayoutPreset">
                     <option value="default">Default</option>
@@ -326,6 +334,7 @@
           const lb = document.getElementById('settingsLeaderboard');
           const pm = document.getElementById('settingsPrivacyMode');
           const iw = document.getElementById('settingsIgnoreWhisper');
+          const vm = document.getElementById('settingsViewMode');
           const lp = document.getElementById('settingsLayoutPreset');
           const pb = document.getElementById('settingsPreferredBillingMethod');
           const ea = document.getElementById('settingsEmailAlerts');
@@ -342,6 +351,7 @@
           if (lb) lb.checked = Boolean(acc.showOnLeaderboard);
           if (pm) pm.value = acc.privacyMode || 'public';
           if (iw) iw.checked = Boolean(acc.ignoreWhisper);
+          if (vm) vm.value = sessionData.user?.viewMode || 'normal';
           if (lp) lp.value = acc.layoutPreset || 'default';
           if (pb) pb.value = acc.preferredBillingMethod || 'paypal';
           if (ea) ea.checked = acc.emailAlerts !== false;
@@ -396,6 +406,16 @@
           return parseResponse(res);
         }
 
+        async function saveViewModePreference() {
+          const viewMode = document.getElementById('settingsViewMode')?.value || 'normal';
+          const res = await fetch('/api/preferences/view-mode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ viewMode }),
+          });
+          return parseResponse(res);
+        }
+
         form?.addEventListener('submit', async (e) => {
           e.preventDefault();
           if (saveButton) {
@@ -405,18 +425,20 @@
           setMsg('Saving your settings...', false);
 
           try {
-            const [communityRes, currencyData] = await Promise.all([
+            const [communityRes, currencyData, viewModeData] = await Promise.all([
               saveCommunity(),
               saveCurrencyPreference(),
+              saveViewModePreference(),
             ]);
             const communityData = await parseResponse(communityRes);
-            const success = communityRes.ok && currencyData.ok !== false;
+            const success = communityRes.ok && currencyData.ok !== false && viewModeData.ok !== false;
             const msg = success
               ? 'All settings saved.'
-              : (communityData.message || currencyData.message || 'Unable to save all settings.');
+              : (communityData.message || currencyData.message || viewModeData.message || 'Unable to save all settings.');
 
             setMsg(msg, success);
             if (success) {
+              document.body.dataset.viewMode = viewModeData.viewMode || 'normal';
               await loadSettings();
             }
           } catch (error) {

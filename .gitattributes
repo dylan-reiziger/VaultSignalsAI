@@ -1,0 +1,11 @@
+*.pyc export-ignore
+*.db export-ignore
+*.db-shm export-ignore
+*.db-wal export-ignore
+__pycache__ export-ignore
+**/__pycache__ export-ignore
+**/__pycache__/** export-ignore
+application/build/** export-ignore
+application/dist/** export-ignore
+.venv/** export-ignore
+venv/** export-ignore

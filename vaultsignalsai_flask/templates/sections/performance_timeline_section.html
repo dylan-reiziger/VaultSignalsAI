@@ -1,12 +1,13 @@
 <section class="section performance-timeline" id="performanceTimelineSection">
   <div class="section-heading">
     <div>
-      <p class="eyebrow">Transparent Results</p>
-      <h2>Performance Timeline Snapshot</h2>
-      <p class="section-copy">A month-by-month performance view with clear context on conditions and risk posture.</p>
+      <p class="eyebrow">Transparency</p>
+      <h2>Performance Reporting</h2>
+      <p class="section-copy">Results are published only after the reporting period closes and supporting records are reviewed.</p>
     </div>
   </div>
 
+  {% if performance_timeline %}
   <div class="timeline-shell">
     {% for item in performance_timeline %}
     <article class="timeline-item {{ item.status_class }}">
@@ -16,4 +17,13 @@
     </article>
     {% endfor %}
   </div>
+  {% else %}
+  <div class="timeline-shell">
+    <article class="timeline-item is-flat">
+      <p class="timeline-month">Reporting status</p>
+      <strong class="timeline-value">No verified period published</strong>
+      <p class="timeline-note">VaultSignals will not display performance figures until a reviewed record and its supporting source are available.</p>
+    </article>
+  </div>
+  {% endif %}
 </section>

@@ -51,13 +51,10 @@
         <section class="account-tabs-shell" aria-label="Account navigation">
           <nav class="account-tabs-nav" id="accountTabsNav">
             <a class="account-tab-link is-active" href="#account-overview-section">Overview</a>
-            <a class="account-tab-link" href="#account-badges-section">Achievements</a>
-            <a class="account-tab-link" href="#account-purchases-section">Subscriptions</a>
-            <a class="account-tab-link" href="#account-transactions-section">Transaction History</a>
-            <a class="account-tab-link" href="#community-hub-section">Community Hub</a>
-            <a class="account-tab-link" href="/your-signals">Your Signals</a>
-            <a class="account-tab-link" href="/price">Pricing & Billing</a>
-            <a class="account-tab-link pro-tab-link" href="/pro-mode">⚡ Pro Mode</a>
+            <a class="account-tab-link" href="#account-badges-section">Status</a>
+            <a class="account-tab-link" href="#account-billing-section">Billing</a>
+            <a class="account-tab-link" href="#community-hub-section">Community</a>
+            <a class="account-tab-link pro-tab-link" href="/pro-mode">⚡ Pro</a>
           </nav>
         </section>
 
@@ -84,20 +81,16 @@
           <div class="badges-grid" id="badgesContainer"></div>
         </section>
 
-        <!-- Recent Purchases -->
-        <section id="account-purchases-section" class="section visible">
+        <!-- Billing & Activity -->
+        <section id="account-billing-section" class="section visible">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">Subscriptions</p>
-              <h2>Recent Purchases</h2>
+              <p class="eyebrow">Billing</p>
+              <h2>Subscription Activity</h2>
             </div>
           </div>
           <div id="recentPurchasesContainer" class="purchases-list"></div>
-        </section>
-
-        <!-- Transaction History -->
-        <section id="account-transactions-section" class="section visible">
-          <div class="section-heading">
+          <div class="section-heading billing-history-heading">
             <div>
               <p class="eyebrow">Financial</p>
               <h2>Transaction History</h2>

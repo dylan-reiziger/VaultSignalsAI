@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VaultSignals | Market Dashboard</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='vaultsignals-logo.png') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body class="market-dashboard-page" data-view-mode="{{ view_mode }}">
+    <div class="site-shell">
+      <header class="navbar market-dashboard-nav">
+        <a class="brand" href="/dashboard" aria-label="VaultSignals dashboard">
+          <div class="logo">
+            <img class="logo-img" src="{{ url_for('static', filename='vaultsignals-logo.png') }}" alt="VaultSignals logo" />
+          </div>
+          <div>
+            <p class="eyebrow">Market Workspace</p>
+            <h2 class="brand-title">VaultSignals</h2>
+          </div>
+        </a>
+
+        <nav class="nav-links market-dashboard-links" aria-label="Primary navigation">
+          <a class="nav-active" href="/dashboard">Dashboard</a>
+          <a href="/your-signals">Scenarios</a>
+          <a href="/pro-mode">Pro</a>
+          {% if is_logged_in %}
+          <a href="/account/dashboard">Account</a>
+          {% else %}
+          <a href="/">About</a>
+          {% endif %}
+        </nav>
+
+        <div class="nav-actions">
+          {% if is_logged_in %}
+          <a class="ghost-btn" href="/settings">Settings</a>
+          {% else %}
+          <a class="ghost-btn" href="/?login=1">Log in</a>
+          <a class="primary-btn" href="/?signup=1">Create account</a>
+          {% endif %}
+        </div>
+      </header>
+
+      <main class="market-dashboard-shell">
+        <section class="market-dashboard-heading" aria-labelledby="marketDashboardTitle">
+          <div>
+            <p class="eyebrow">Live US Equities</p>
+            <h1 id="marketDashboardTitle">Market overview</h1>
+            <p class="market-dashboard-lede">A focused read on major indexes, moving stocks, and intraday volume.</p>
+          </div>
+          <div class="market-data-status" aria-live="polite">
+            {% if market %}
+            <span class="market-data-status-label">Source</span>
+            <strong>{{ market.source.provider }}</strong>
+            <span>{{ market.generatedAtUtc }}</span>
+            {% else %}
+            <span class="market-data-status-label">Data status</span>
+            <strong>Unavailable</strong>
+            {% endif %}
+            <a class="market-refresh-link" href="/dashboard">Refresh</a>
+          </div>
+        </section>
+
+        {% if market %}
+        <section class="market-index-grid" aria-label="Major market indexes">
+          {% for quote in market.indices %}
+          <article class="market-index-card">
+            <div class="market-card-head">
+              <span>{{ quote.name }}</span>
+              <span class="market-symbol">{{ quote.symbol }}</span>
+            </div>
+            <strong class="market-price">${{ '%.2f'|format(quote.price) }}</strong>
+            <span class="market-change {% if quote.changePercent >= 0 %}is-positive{% else %}is-negative{% endif %}">
+              {% if quote.changePercent >= 0 %}+{% endif %}{{ '%.2f'|format(quote.changePercent) }}%
+            </span>
+            <span class="market-state">{{ quote.marketState }}</span>
+          </article>
+          {% else %}
+          <article class="market-index-card market-index-card--empty">
+            <span>Major index data is unavailable.</span>
+          </article>
+          {% endfor %}
+        </section>
+
+        <section class="market-content-grid">
+          <section class="market-table-panel" aria-labelledby="marketMoversTitle">
+            <div class="market-panel-head">
+              <div>
+                <p class="eyebrow">Market Movement</p>
+                <h2 id="marketMoversTitle">Stocks on the move</h2>
+              </div>
+              <span class="market-panel-note">Session change</span>
+            </div>
+            <div class="market-movers-grid">
+              <div class="market-table-wrap">
+                <h3>Gainers</h3>
+                <table>
+                  <thead>
+                    <tr><th scope="col">Stock</th><th scope="col">Price</th><th scope="col">Change</th></tr>
+                  </thead>
+                  <tbody>
+                    {% for quote in market.gainers %}
+                    <tr>
+                      <td><strong>{{ quote.symbol }}</strong><span>{{ quote.name }}</span></td>
+                      <td>${{ '%.2f'|format(quote.price) }}</td>
+                      <td class="market-change is-positive">+{{ '%.2f'|format(quote.changePercent) }}%</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="3" class="market-table-empty">No current gainers available.</td></tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              <div class="market-table-wrap">
+                <h3>Losers</h3>
+                <table>
+                  <thead>
+                    <tr><th scope="col">Stock</th><th scope="col">Price</th><th scope="col">Change</th></tr>
+                  </thead>
+                  <tbody>
+                    {% for quote in market.losers %}
+                    <tr>
+                      <td><strong>{{ quote.symbol }}</strong><span>{{ quote.name }}</span></td>
+                      <td>${{ '%.2f'|format(quote.price) }}</td>
+                      <td class="market-change is-negative">{{ '%.2f'|format(quote.changePercent) }}%</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="3" class="market-table-empty">No current losers available.</td></tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <aside class="market-scenario-panel" aria-labelledby="scenarioTitle">
+            <p class="eyebrow">12-Hour Scenario</p>
+            <h2 id="scenarioTitle">No scenario published</h2>
+            <p>A 12-hour scenario appears here only after a recorded system output is available. This view currently reports live market data, not a forecast.</p>
+            <a class="ghost-btn" href="/your-signals">Open scenarios</a>
+            <div class="market-pro-note">
+              <span>Pro</span>
+              <p>Active Pro members can open the protected extended desk from their account.</p>
+              <a href="/pro-mode">View Pro access</a>
+            </div>
+          </aside>
+        </section>
+
+        <section class="market-table-panel market-volume-panel" aria-labelledby="volumeLeadersTitle">
+          <div class="market-panel-head">
+            <div>
+              <p class="eyebrow">Watchlist</p>
+              <h2 id="volumeLeadersTitle">Volume leaders</h2>
+            </div>
+            <span class="market-panel-note">Reported intraday volume</span>
+          </div>
+          <div class="market-volume-table-wrap">
+            <table>
+              <thead>
+                <tr><th scope="col">Stock</th><th scope="col">Last</th><th scope="col">Session range</th><th scope="col">Volume</th><th scope="col">Updated</th></tr>
+              </thead>
+              <tbody>
+                {% for quote in market.volumeLeaders %}
+                <tr>
+                  <td><strong>{{ quote.symbol }}</strong><span>{{ quote.name }}</span></td>
+                  <td>${{ '%.2f'|format(quote.price) }}</td>
+                  <td>${{ '%.2f'|format(quote.dayLow) }} - ${{ '%.2f'|format(quote.dayHigh) }}</td>
+                  <td>{{ '{:,.0f}'.format(quote.volume) }}</td>
+                  <td>{{ quote.updatedAtUtc }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="market-table-empty">No current volume data is available.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        {% else %}
+        <section class="market-unavailable" aria-live="polite">
+          <p class="eyebrow">Market Data</p>
+          <h2>Live quotes are temporarily unavailable</h2>
+          <p>{{ market_message }}</p>
+          <a class="primary-btn" href="/dashboard">Try again</a>
+        </section>
+        {% endif %}
+
+        <p class="market-disclaimer">Market data can be delayed or incomplete. VaultSignals does not provide investment advice or guaranteed outcomes.</p>
+      </main>
+    </div>
+  </body>
+</html>

@@ -3,7 +3,7 @@
 ## Project structure
 - `app.py`: main Flask backend (routes, auth, billing, market APIs)
 - `data/pricing_catalog.json`: pricing tiers, discount tags, promo plans
-- `data/daily_signal_blueprints.json`: daily signal seed templates
+- `data/daily_signal_blueprints.json`: opt-in development-only draft fixtures
 - `sql/auth_schema.sql`: auth/account SQL reference schema
 - `templates/`: HTML templates
 - `static/style.css`: shared styling
@@ -90,11 +90,7 @@ MARKET_CACHE_TTL_SECONDS=30
 FLASK_RUN_HOST=127.0.0.1
 FLASK_RUN_PORT=5000
 FLASK_DEBUG=false
-```
-
-Optional one-line JSON env:
-```text
-STATIC_STOCK_FEED=[{"symbol":"NASDAQ","name":"NASDAQ","price":19234.56,"change":2.41}]
+SEED_DEMO_SIGNAL_BLUEPRINTS=false
 ```
 
 ## Current features
@@ -103,7 +99,8 @@ STATIC_STOCK_FEED=[{"symbol":"NASDAQ","name":"NASDAQ","price":19234.56,"change":
 - Admin Signals panel (`/admin/signals`) with create, edit, publish/unpublish, and delete controls
 - Currency auto-suggestion + manual override with account/device persistence
 - Real-time market feed and on-site signal alerts
-- Data-driven pricing and signal seed catalogs (no large hardcoded blocks)
+- Operator-published daily signals with source-aware filtering
+- Optional draft-only signal blueprint fixtures for local development
 
 ## Notes
 - Passwords use Werkzeug hashing.
@@ -111,3 +108,4 @@ STATIC_STOCK_FEED=[{"symbol":"NASDAQ","name":"NASDAQ","price":19234.56,"change":
 - Sensitive account and billing fields are encrypted when `APP_DATA_ENCRYPTION_KEY` is set.
 - Login/account endpoints include rate limiting.
 - Security headers are added on responses.
+- Static signal blueprints never reach member APIs unless an administrator explicitly publishes them.

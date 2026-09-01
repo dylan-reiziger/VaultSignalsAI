@@ -1,0 +1,41 @@
+name: Publish release download
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+
+      - name: Build source archive
+        shell: bash
+        run: |
+          tag_name="${GITHUB_REF_NAME}"
+          archive_name="VaultSignalsAI-Flask-${tag_name}-source.zip"
+          git archive --format=zip --prefix="VaultSignalsAI-Flask-${tag_name}/" --output="${archive_name}" "${GITHUB_SHA}"
+          unzip -l "${archive_name}"
+          test -f "${archive_name}"
+          test "$(unzip -Z1 "${archive_name}" | grep -c "^VaultSignalsAI-Flask-${tag_name}/vaultsignalsai_flask/app.py$")" -eq 1
+          test "$(unzip -Z1 "${archive_name}" | grep -Ec "(^|/)(__pycache__/|.*\.pyc$|.*\.db(-shm|-wal)?$|\.venv/|venv/|application/(build|dist)/)")" -eq 0
+          echo "ARCHIVE_NAME=${archive_name}" >> "${GITHUB_ENV}"
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" "${ARCHIVE_NAME}" --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" "${ARCHIVE_NAME}" \
+              --title "VaultSignalsAI ${GITHUB_REF_NAME}" \
+              --notes-file .github/release-notes.md
+          fi
