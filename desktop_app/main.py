@@ -36,7 +36,7 @@ from tkinter import (
 from tkinter import messagebox
 
 APP_TITLE = "VaultSignalsAI"
-APP_VERSION = "v1.0.12"
+APP_VERSION = "v1.0.13"
 WINDOWS_APP_ID = "VaultSignalsAI.Desktop"
 REFRESH_INTERVAL_SECONDS = 1
 CANDLE_REFRESH_SECONDS = 60
@@ -1471,15 +1471,15 @@ class MarketSignalApp:
         self.add_toggle_row(startup, "Show the 3-second VaultSignalsAI loading screen", self.splash_enabled)
         self.add_toggle_row(startup, "Open in full screen after startup", self.start_fullscreen_enabled)
 
-        alerts = self.create_page_card(content, "High-impact market alerts", "Alerts use public price and volume data. They flag volatility, not a guaranteed opportunity or return.")
+        alerts = self.create_page_card(content, "12-hour market outlook alerts", "Alerts use the current market's observed-volatility model, not a guaranteed outcome or return.")
         alerts.pack(fill=X, pady=(0, 18))
-        self.add_toggle_row(alerts, "Scan eligible liquid crypto markets for high-impact movement alerts", self.alerts_enabled)
+        self.add_toggle_row(alerts, "Show a popup when the current market's 12-hour modelled range is high-impact", self.alerts_enabled)
         alert_form = Frame(alerts, bg=PANEL)
         alert_form.pack(fill=X, padx=22, pady=(0, 8))
-        self.add_form_combo(alert_form, "Minimum 24H movement", self.alert_threshold_choice, ["5", "8", "10"])
+        self.add_form_combo(alert_form, "Minimum 12H modelled range", self.alert_threshold_choice, ["5", "8", "10"])
         Label(
             alerts,
-            text="The scanner evaluates USDT, USDC, and EUR spot markets. Alerts require the selected 24H movement threshold and at least $50M equivalent quote volume. Each market direction is limited to one alert every 30 minutes.",
+            text="Alerts apply to the market open in the workspace after at least 24 one-hour candles are available. A popup requires the selected modelled 12H range and is limited to one per market every 30 minutes.",
             fg=MUTED,
             bg=PANEL,
             wraplength=650,
@@ -1758,7 +1758,6 @@ class MarketSignalApp:
     def update_market_metrics(self, metrics):
         self.market_metrics = metrics
         self.render_market_results(preselect=self.selected_browser_symbol())
-        self.check_high_impact_market_alerts()
 
     def update_ticker(self, data):
         price = float(data.get("lastPrice", 0.0))
@@ -1806,70 +1805,71 @@ class MarketSignalApp:
             self.social_sentiment_text.set("CANDLE-ONLY")
             self.recalculate_scenario()
 
-    def check_high_impact_market_alerts(self):
-        """Alert on a single large, liquid public-market move - never an asserted profit opportunity."""
-        if not self.alerts_enabled.get() or self.alert_popup:
+    def check_12_hour_outlook_alert(self):
+        """Alert on a material 12-hour observed-volatility scenario, never a promised result."""
+        if not self.alerts_enabled.get() or self.alert_popup or not self.scenario:
             return
 
-        candidates = []
-        allowed_symbols = {market["symbol"] for market in self.market_directory}
-        if self.restrict_alerts_to_favorites.get():
-            allowed_symbols.intersection_update(self.favorite_symbols)
-        for symbol, metrics in self.market_metrics.items():
-            if symbol not in allowed_symbols:
-                continue
-            if abs(metrics["change"]) < self.alert_threshold_percent:
-                continue
-            if metrics["quote_volume"] < ALERT_MIN_QUOTE_VOLUME:
-                continue
-            direction = "upward" if metrics["change"] > 0 else "downward"
-            alert_key = (symbol, direction)
-            if time.monotonic() - self.alert_cooldowns.get(alert_key, 0.0) < ALERT_COOLDOWN_SECONDS:
-                continue
-            candidates.append((self.market_score(symbol), symbol, metrics, direction))
-
-        if not candidates:
+        symbol = self.active_symbol
+        if self.restrict_alerts_to_favorites.get() and symbol not in self.favorite_symbols:
             return
-        _score, symbol, metrics, direction = max(candidates, key=lambda item: item[0])
-        self.alert_cooldowns[(symbol, direction)] = time.monotonic()
-        self.show_high_impact_alert(symbol, metrics["change"], metrics["quote_volume"], direction)
 
-    def show_high_impact_alert(self, symbol, percent_change, quote_volume, direction):
+        reference_price = self.scenario["reference_price"]
+        if reference_price <= 0:
+            return
+
+        midpoint_change = (self.scenario["midpoint"] / reference_price - 1) * 100
+        lower_change = (self.scenario["lower"] / reference_price - 1) * 100
+        upper_change = (self.scenario["upper"] / reference_price - 1) * 100
+        if max(abs(lower_change), abs(upper_change)) < self.alert_threshold_percent:
+            return
+
+        alert_key = (symbol, "12h_outlook")
+        if time.monotonic() - self.alert_cooldowns.get(alert_key, 0.0) < ALERT_COOLDOWN_SECONDS:
+            return
+
+        self.alert_cooldowns[alert_key] = time.monotonic()
+        self.show_12_hour_outlook_alert(symbol, midpoint_change, lower_change, upper_change)
+
+    def show_12_hour_outlook_alert(self, symbol, midpoint_change, lower_change, upper_change):
         self.alert_symbol = symbol
         alert = self.alert_popup = Toplevel(self.root)
-        alert.title("VaultSignalsAI • High-impact movement")
+        alert.title("VaultSignalsAI • 12-hour market outlook")
         alert.configure(bg="#0d1117")
         alert.resizable(False, False)
         alert.transient(self.root)
         alert.attributes("-topmost", True)
         alert.protocol("WM_DELETE_WINDOW", self.dismiss_alert)
 
-        width, height = 440, 275
+        width, height = 470, 320
         x = self.root.winfo_screenwidth() - width - 34
         y = 70
         alert.geometry(f"{width}x{height}+{x}+{y}")
 
-        Label(alert, text="HIGH-IMPACT MARKET MOVEMENT", fg="#f5c95c", bg="#0d1117", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=22, pady=(20, 4))
+        Label(alert, text="NEXT 12-HOUR MARKET OUTLOOK", fg="#f5c95c", bg="#0d1117", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=22, pady=(20, 4))
         Label(alert, text=self.display_symbol(symbol), fg=TEXT, bg="#0d1117", font=("Segoe UI", 19, "bold")).pack(anchor="w", padx=22)
-        colour = GREEN if percent_change > 0 else RED
+        colour = GREEN if midpoint_change >= 0 else RED
         Label(
             alert,
-            text=f"24H movement: {percent_change:+.2f}%  •  {direction.title()} move",
+            text=f"Modelled midpoint: {midpoint_change:+.2f}%",
             fg=colour,
             bg="#0d1117",
             font=("Segoe UI", 11, "bold"),
         ).pack(anchor="w", padx=22, pady=(6, 4))
         Label(
             alert,
-            text=f"Detected: {datetime.now().strftime('%d %b %Y  •  %H:%M:%S')}",
+            text=(
+                f"Modelled range: {lower_change:+.2f}% to {upper_change:+.2f}%\n"
+                f"Calculated: {self.scenario['as_of'].strftime('%d %b %Y  •  %H:%M:%S')}"
+            ),
             fg="#8f9dab",
             bg="#0d1117",
+            justify=LEFT,
             font=("Segoe UI", 8),
-        ).pack(anchor="w", padx=22, pady=(0, 5))
+        ).pack(anchor="w", padx=22, pady=(0, 8))
         Label(
             alert,
-            text=f"Quote volume: {self.format_compact_number(quote_volume)} USDT\n"
-                 "This is a volatility alert based on public market data, not a profit guarantee or investment instruction.",
+            text="Uses recent one-hour candles, volume, and optional public sentiment. This is a modelled range for the next 12 hours, not a promised price, profit guarantee, or trading instruction.",
             fg="#b8c3cf",
             bg="#0d1117",
             justify=LEFT,
@@ -1879,7 +1879,7 @@ class MarketSignalApp:
 
         actions = Frame(alert, bg="#0d1117")
         actions.pack(fill=X, padx=22, pady=(0, 18))
-        self.create_button(actions, "Open market", self.open_alert_market, primary=True).pack(side=LEFT)
+        self.create_button(actions, "View outlook", self.open_alert_market, primary=True).pack(side=LEFT)
         self.create_button(actions, "Dismiss", self.dismiss_alert).pack(side=LEFT, padx=(8, 0))
         self.root.bell()
 
@@ -1892,7 +1892,7 @@ class MarketSignalApp:
         self.root.deiconify()
         self.root.lift()
         self.root.focus_force()
-        self.last_update.set(f"Opened {self.display_symbol(self.alert_symbol)} after a high-impact movement alert.")
+        self.last_update.set(f"Opened {self.display_symbol(self.alert_symbol)} after a 12-hour market outlook alert.")
 
     def dismiss_alert(self):
         if self.alert_popup:
@@ -2034,6 +2034,7 @@ class MarketSignalApp:
         midpoint_change = (final_point["midpoint"] / reference_price - 1) * 100
         upper_change = (final_point["upper"] / reference_price - 1) * 100
         self.scenario_change_text.set(f"Mid {midpoint_change:+.2f}% • upper {upper_change:+.2f}%")
+        self.check_12_hour_outlook_alert()
 
     def change_text_colour(self, percent_change):
         colour = GREEN if percent_change >= 0 else RED
