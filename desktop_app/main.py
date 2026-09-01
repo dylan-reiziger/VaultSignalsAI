@@ -36,7 +36,7 @@ from tkinter import (
 from tkinter import messagebox
 
 APP_TITLE = "VaultSignalsAI"
-APP_VERSION = "v1.0.13"
+APP_VERSION = "v1.0.14"
 WINDOWS_APP_ID = "VaultSignalsAI.Desktop"
 REFRESH_INTERVAL_SECONDS = 1
 CANDLE_REFRESH_SECONDS = 60
@@ -1884,15 +1884,18 @@ class MarketSignalApp:
         self.root.bell()
 
     def open_alert_market(self):
+        symbol = self.alert_symbol
         self.dismiss_alert()
+        if not symbol:
+            return
         self.show_main_workspace()
-        self.follow_symbol.set(self.alert_symbol)
-        self.profile_market.set(self.alert_symbol)
+        self.follow_symbol.set(symbol)
+        self.profile_market.set(symbol)
         self.open_followed_asset()
         self.root.deiconify()
         self.root.lift()
         self.root.focus_force()
-        self.last_update.set(f"Opened {self.display_symbol(self.alert_symbol)} after a 12-hour market outlook alert.")
+        self.last_update.set(f"Opened {self.display_symbol(symbol)} after a 12-hour market outlook alert.")
 
     def dismiss_alert(self):
         if self.alert_popup:
