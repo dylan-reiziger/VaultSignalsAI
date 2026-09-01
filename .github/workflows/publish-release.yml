@@ -32,9 +32,7 @@ jobs:
         shell: pwsh
         run: |
           $tagName = "${{ github.ref_name }}"
-          New-Item -ItemType Directory -Path "desktop-release-assets" -Force | Out-Null
-          Set-Content -Path "desktop-release-assets/VaultSignalsAI-version.txt" -Value $tagName -NoNewline
-          python -m PyInstaller --noconfirm --clean --windowed --onefile --name "VaultSignalsAI" --add-data "desktop-release-assets;assets" --distpath "desktop-dist" --workpath "desktop-build" --specpath "desktop-spec" "desktop_app/main.py"
+          python -m PyInstaller --noconfirm --clean --windowed --onefile --name "VaultSignalsAI" --distpath "desktop-dist" --workpath "desktop-build" --specpath "desktop-spec" "desktop_app/main.py"
           $archiveName = "VaultSignalsAI-windows-x64-$tagName.zip"
           Compress-Archive -Path "desktop-dist/VaultSignalsAI.exe" -DestinationPath $archiveName -CompressionLevel Optimal
           $hash = (Get-FileHash -Algorithm SHA256 $archiveName).Hash.ToLowerInvariant()

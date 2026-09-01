@@ -36,7 +36,7 @@ from tkinter import (
 from tkinter import messagebox
 
 APP_TITLE = "VaultSignalsAI"
-APP_VERSION = "v1.0.10"
+APP_VERSION = "v1.0.12"
 WINDOWS_APP_ID = "VaultSignalsAI.Desktop"
 REFRESH_INTERVAL_SECONDS = 1
 CANDLE_REFRESH_SECONDS = 60
