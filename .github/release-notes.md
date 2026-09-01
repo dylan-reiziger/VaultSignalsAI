@@ -9,4 +9,6 @@
 
 ## Download contents
 
-The attached source archive excludes local SQLite data, Python environments, bytecode caches, build output, and Git metadata. Follow the included `RELEASE-NOTES.md` to run it locally.
+- `VaultSignalsAI-windows-x64-<version>.zip` contains the Windows desktop companion executable.
+- The matching `.sha256` file lets you verify the Windows download before running it.
+- The source archive excludes local SQLite data, Python environments, bytecode caches, build output, and Git metadata. Follow the included `RELEASE-NOTES.md` to run it locally.

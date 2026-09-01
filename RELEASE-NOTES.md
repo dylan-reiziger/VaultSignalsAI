@@ -17,6 +17,10 @@
 3. Run `python app.py` from this package root.
 4. Open `http://127.0.0.1:5000/dashboard`.
 
+## Windows desktop companion
+
+The GitHub Release includes a separate `VaultSignalsAI-windows-x64-<version>.zip` download. Extract it and run `VaultSignalsAI.exe`. The companion saves its preferences in `%LOCALAPPDATA%\VaultSignalsAI\client_config.json`.
+
 ## Development-only sample signals
 
 Static signal blueprints are disabled by default. To seed draft-only local fixtures, set:
