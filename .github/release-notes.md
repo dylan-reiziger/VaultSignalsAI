@@ -6,6 +6,8 @@
 - Server-enforced Pro access to the protected signal desk.
 - Source-aware signal publication: static blueprints are disabled by default and member APIs return only operator-approved signals.
 - Removed fabricated stock-feed and performance fallback behavior.
+- Restored the local-first desktop market workspace with no website-account requirement.
+- Added an in-app Update button that checks the latest GitHub Release and opens its Windows download.
 
 ## Download contents
 

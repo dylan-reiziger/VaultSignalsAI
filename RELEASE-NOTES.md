@@ -21,6 +21,8 @@
 
 The GitHub Release includes a separate `VaultSignalsAI-windows-x64-<version>.zip` download. Extract it and run `VaultSignalsAI.exe`. The companion saves its preferences in `%LOCALAPPDATA%\VaultSignalsAI\client_config.json`.
 
+The desktop workspace uses only a local profile and public market data; it does not require a website account. Select **Update** in the application header to check the latest GitHub Release and open its Windows download.
+
 ## Development-only sample signals
 
 Static signal blueprints are disabled by default. To seed draft-only local fixtures, set:

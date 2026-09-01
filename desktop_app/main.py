@@ -1,1640 +1,2288 @@
-from __future__ import annotations
-
+import ctypes
 import json
+import math
 import os
 import queue
-import secrets
+import random
+import sys
 import threading
-from dataclasses import asdict, dataclass
+import time
+import urllib.request
+import webbrowser
 from datetime import datetime
-from http.cookiejar import CookieJar
+from getpass import getuser
 from pathlib import Path
-from urllib.error import HTTPError, URLError
-from urllib.parse import urljoin
-from urllib.request import HTTPCookieProcessor, Request, build_opener
+from tkinter import (
+    BOTH,
+    BooleanVar,
+    CENTER,
+    Entry,
+    LEFT,
+    RIGHT,
+    X,
+    Y,
+    Button,
+    Canvas,
+    Frame,
+    Label,
+    Listbox,
+    PhotoImage,
+    Scrollbar,
+    StringVar,
+    Tk,
+    Toplevel,
+    ttk,
+)
+from tkinter import messagebox
 
-import tkinter as tk
-from tkinter import messagebox, ttk
+APP_TITLE = "VaultSignalsAI"
+APP_VERSION = "v1.0.10"
+WINDOWS_APP_ID = "VaultSignalsAI.Desktop"
+REFRESH_INTERVAL_SECONDS = 1
+CANDLE_REFRESH_SECONDS = 60
+CANDLE_HISTORY_LIMIT = 500
+DEFAULT_VISIBLE_CANDLES = 100
+MIN_VISIBLE_CANDLES = 20
+DEFAULT_SYMBOL = "BTCUSDT"
+SYMBOL_OPTIONS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT"]
+ALERT_MIN_QUOTE_VOLUME = 50_000_000
+ALERT_COOLDOWN_SECONDS = 30 * 60
+MARKET_EVALUATION_SECONDS = 45
+SCENARIO_LOOKBACK_CANDLES = 48
+SCENARIO_HORIZON_HOURS = 12
+SOCIAL_SENTIMENT_REFRESH_SECONDS = 5 * 60
+SETTINGS_PATH = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "VaultSignalsAI" / "settings.json"
+LOGO_RELATIVE_PATH = Path("assets") / "VaultSignalsAI-logo.png"
+VERSION_RELATIVE_PATH = Path("assets") / "VaultSignalsAI-version.txt"
+GITHUB_LATEST_RELEASE_URL = "https://api.github.com/repos/dylan-reiziger/VaultSignalsAI/releases/latest"
+SPLASH_MESSAGES = [
+    "Setting up the market...",
+    "Building the signals...",
+    "Remembering your name again?",
+]
 
-try:
-    import ctypes
-except Exception:
-    ctypes = None
+BACKGROUND = "#07090c"
+PANEL = "#0d1015"
+PANEL_HOVER = "#151a22"
+BORDER = "#1c222b"
+GRID = "#171c23"
+TEXT = "#e4e9f0"
+MUTED = "#8a95a3"
+BLUE = "#5e8cff"
+GREEN = "#17c784"
+RED = "#f05b69"
 
-try:
-    from plyer import notification as plyer_notification
-except Exception:
-    plyer_notification = None
-
-APP_NAME = "VaultSignalsAI"
-APP_DIR = Path(__file__).resolve().parent
-LEGACY_CONFIG_PATH = APP_DIR / "client_config.json"
-CONFIG_PATH = Path(os.getenv("LOCALAPPDATA", str(Path.home()))) / APP_NAME / "client_config.json"
-
-MARKETS = ("NASDAQ", "NYSE", "SP500", "CRYPTO")
-SYMBOLS_BY_MARKET = {
-    "NASDAQ": ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "META"],
-    "NYSE": ["JPM", "KO", "DIS", "BA", "WMT", "NKE"],
-    "SP500": ["SPY", "QQQ", "IWM", "DIA", "VOO", "VTI"],
-    "CRYPTO": ["BTCUSD", "ETHUSD", "SOLUSD", "ADAUSD", "XRPUSD"],
-}
-RNG = secrets.SystemRandom()
-
-FULL_WINDOW_GEOMETRY = "1020x620"
-FULL_WINDOW_MINSIZE = (680, 420)
-COMPACT_WINDOW_GEOMETRY = "720x340"
-COMPACT_WINDOW_MINSIZE = (600, 300)
-TASKBAR_SAFE_MODE = True
-VIEW_MODES = ("Feed", "Account", "Settings")
-
-
-@dataclass
-class ClientConfig:
-    website_url: str = "http://127.0.0.1:5000"
-    username: str = ""
-    discord_webhook: str = ""
-    market: str = "NASDAQ"
-    sync_seconds: int = 5
-    compact_mode: bool = False
-    windows_notifications: bool = True
-    in_app_notifications: bool = True
-
-
-def load_config() -> ClientConfig:
-    source_path = CONFIG_PATH if CONFIG_PATH.exists() else LEGACY_CONFIG_PATH
-    if not source_path.exists():
-        return ClientConfig()
-
-    try:
-        payload = json.loads(source_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return ClientConfig()
-
-    if not isinstance(payload, dict):
-        return ClientConfig()
-
-    config = ClientConfig()
-    config.website_url = str(payload.get("website_url") or config.website_url)
-    config.username = str(payload.get("username") or config.username)
-    config.discord_webhook = str(payload.get("discord_webhook") or config.discord_webhook)
-
-    market = str(payload.get("market") or config.market).upper()
-    config.market = market if market in MARKETS else config.market
-
-    sync_seconds = payload.get("sync_seconds")
-    if isinstance(sync_seconds, int) and 5 <= sync_seconds <= 3600:
-        config.sync_seconds = sync_seconds
-
-    config.compact_mode = bool(payload.get("compact_mode", config.compact_mode))
-    config.windows_notifications = bool(
-        payload.get("windows_notifications", config.windows_notifications)
-    )
-    config.in_app_notifications = bool(
-        payload.get("in_app_notifications", config.in_app_notifications)
-    )
-    return config
-
-
-def save_config(config: ClientConfig) -> None:
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG_PATH.write_text(json.dumps(asdict(config), indent=2), encoding="utf-8")
+RELEASE_TODO_GROUPS = (
+    (
+        "Brand and product",
+        (
+            ("logo_added", "Add the final owned VaultSignalsAI logo asset."),
+            ("data_sources_reviewed", "Record source licences, refresh rates, and limitations."),
+            ("claims_reviewed", "Remove profit claims, guarantees, and buy/sell/hold instructions."),
+        ),
+    ),
+    (
+        "UK compliance and customer protection",
+        (
+            ("legal_review", "Obtain qualified, current legal and compliance advice before UK release."),
+            ("regulatory_scope", "Confirm the applicable product and financial-promotion requirements."),
+            ("customer_documents", "Publish accurate risk warnings, terms, privacy, support, and data disclosures."),
+        ),
+    ),
+    (
+        "Build and publishing",
+        (
+            ("clean_device_test", "Test the extracted package on a clean Windows device."),
+            ("code_signing", "Sign the executable and installer with an organisation-controlled certificate."),
+            ("support_and_updates", "Publish support, update, security-reporting, and release-checksum processes."),
+        ),
+    ),
+)
+RELEASE_TODO_KEYS = tuple(key for _group, items in RELEASE_TODO_GROUPS for key, _label in items)
 
 
-class VaultSignalsApp:
-    def __init__(self, root: tk.Tk) -> None:
+class MarketSignalApp:
+    def __init__(self, root):
         self.root = root
-        self.config = load_config()
+        self.root.title(APP_TITLE)
+        self.root.geometry("1440x820")
+        self.root.minsize(1040, 660)
+        self.root.configure(bg=BACKGROUND)
+        self.root.protocol("WM_DELETE_WINDOW", self.close_window)
+        self.brand_images = []
+        self.logo_image = None
+        self.app_version = self.load_app_version()
+        self.load_brand_assets()
 
-        self.logged_in = False
-        self.sync_running = False
-        self.stop_event = threading.Event()
-        self.sync_thread: threading.Thread | None = None
-        self.event_queue: queue.Queue[dict] = queue.Queue()
+        self.is_fullscreen = False
+        self.running = True
+        self.market_thread_started = False
+        self.settings = self.load_local_settings()
+        self.local_windows_user = self.get_local_user_name()
+        self.user_name = self.settings["display_name"]
+        self.follow_symbol = StringVar(value=self.settings["default_symbol"])
+        self.welcome_text = StringVar(value=f"Welcome, {self.user_name}")
+        self.last_update = StringVar(value="Connecting to live market data...")
+        self.market_name = StringVar(value=self.display_symbol(self.follow_symbol.get()))
+        self.price_text = StringVar(value="--")
+        self.change_text = StringVar(value="--")
+        self.signal_text = StringVar(value="ANALYSING")
+        self.signal_detail = StringVar(value="Waiting for the first market update.")
+        self.volume_text = StringVar(value="--")
+        self.range_text = StringVar(value="--")
+        self.momentum_text = StringVar(value="--")
+        self.trend_text = StringVar(value="--")
+        self.scenario_mid_text = StringVar(value="Waiting for candles")
+        self.scenario_upper_text = StringVar(value="Waiting for candles")
+        self.scenario_change_text = StringVar(value="Waiting for candles")
+        self.social_sentiment_text = StringVar(value="CANDLE-ONLY")
+        self.nav_expanded = False
+        self.nav_close_job = None
+        self.active_symbol = self.follow_symbol.get()
+        self.candles = []
+        self.latest_price = None
+        self.scenario = None
+        self.social_sentiment_score = None
+        self.social_sentiment_source = "No social sentiment connector configured"
+        self.social_sentiment_updated_at = ""
+        self.visible_candle_count = DEFAULT_VISIBLE_CANDLES
+        self.chart_view = None
+        self.data_queue = queue.Queue()
+        self.last_candle_symbol = ""
+        self.last_candle_fetch = 0.0
+        self.last_depth_fetch = 0.0
+        self.depth_rows = []
+        self.profile_name = StringVar(value=self.user_name)
+        self.profile_market = StringVar(value=self.settings["default_symbol"])
+        self.discord_contact = StringVar(value=self.settings.get("discord_contact", ""))
+        self.discord_tier = StringVar(value=self.settings.get("discord_tier", "Unverified"))
+        self.discord_market_updates_opt_in = BooleanVar(value=self.settings.get("discord_market_updates_opt_in", False))
+        self.refresh_interval_choice = StringVar(value=str(self.settings["refresh_seconds"]))
+        self.splash_enabled = BooleanVar(value=self.settings["show_splash"])
+        self.start_fullscreen_enabled = BooleanVar(value=self.settings["start_fullscreen"])
+        self.refresh_interval_seconds = self.settings["refresh_seconds"]
+        self.page_overlay = None
+        self.account_notice = StringVar(value="")
+        self.settings_notice = StringVar(value="")
+        self.alerts_enabled = BooleanVar(value=self.settings["alerts_enabled"])
+        self.alert_threshold_choice = StringVar(value=str(self.settings["alert_threshold_percent"]))
+        self.alert_threshold_percent = self.settings["alert_threshold_percent"]
+        self.restrict_alerts_to_favorites = BooleanVar(value=self.settings.get("restrict_alerts_to_favorites", False))
+        self.scenario_overlay_enabled = BooleanVar(value=self.settings["show_scenario_overlay"])
+        self.social_sentiment_url = StringVar(value=self.settings["social_sentiment_url"])
+        self.release_todo_status = {
+            key: BooleanVar(value=self.settings["release_todo_status"][key])
+            for key in RELEASE_TODO_KEYS
+        }
+        if self.logo_image and not self.release_todo_status["logo_added"].get():
+            self.release_todo_status["logo_added"].set(True)
+            self.settings["release_todo_status"]["logo_added"] = True
+            self.persist_settings()
+        self.release_todo_summary = StringVar()
+        self.update_release_todo_summary()
+        self.alert_cooldowns = {}
+        self.alert_popup = None
+        self.alert_symbol = ""
+        self.favorite_symbols = set(self.settings["favorite_symbols"])
+        self.favorite_market_summary = StringVar()
+        self.restrict_alerts_to_favorites.trace_add("write", self.on_alert_scope_changed)
+        self.update_favorite_market_summary()
+        self.market_directory = self.fallback_markets()
+        self.market_directory_loaded = False
+        self.market_directory_loading = False
+        self.market_evaluation_started = False
+        self.social_sentiment_thread_started = False
+        self.market_metrics = {}
+        self.market_browser = None
+        self.market_search = StringVar(value="")
+        self.market_filter = StringVar(value="ALL")
+        self.visible_market_symbols = []
+        self.market_browser_status = StringVar(value="Loading live market directory...")
 
-        self.drag_offset_x = 0
-        self.drag_offset_y = 0
-        self.appwindow_style_ready = False
-
-        self.preview_mode_login = False
-        self.website_cookie_jar = CookieJar()
-        self.website_opener = build_opener(HTTPCookieProcessor(self.website_cookie_jar))
-        self.known_signal_keys: set[str] = set()
-        self.known_signal_order: list[str] = []
-
-        self.sync_market = self.config.market
-        self.sync_seconds = self.config.sync_seconds
-        self.sync_discord_webhook = self.config.discord_webhook
-        self.sync_windows_notifications = self.config.windows_notifications
-        self.sync_in_app_notifications = self.config.in_app_notifications
-
-        self.root.title(APP_NAME)
-        self.root.geometry(FULL_WINDOW_GEOMETRY)
-        self.root.minsize(*FULL_WINDOW_MINSIZE)
-        self.root.configure(bg="#0a0d14")
-        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
-
-        if not TASKBAR_SAFE_MODE:
-            self.root.overrideredirect(True)
-            self.root.bind("<Map>", self.on_map_event)
-
-        self.setup_styles()
+        self.configure_styles()
         self.build_layout()
-        self.restore_state_from_config()
-        self.root.after(120, self.enable_alt_tab_visibility)
+        self.root.bind("<F11>", self.toggle_fullscreen)
+        self.root.bind("<Escape>", self.exit_fullscreen)
+        self.root.bind("<Control-minus>", lambda _event: self.zoom_out())
+        self.root.bind("<Control-equal>", lambda _event: self.zoom_in())
+        self.root.after(120, self.process_market_updates)
+        if self.splash_enabled.get():
+            self.show_startup_splash()
+        else:
+            self.finish_startup()
 
-        self.root.after(220, self.drain_event_queue)
-
-    def setup_styles(self) -> None:
-        style = ttk.Style(self.root)
+    def configure_styles(self):
+        style = ttk.Style()
         style.theme_use("clam")
-
         style.configure(
-            "Signals.Treeview",
-            background="#121824",
-            fieldbackground="#121824",
-            foreground="#dfe8ff",
-            borderwidth=0,
-            rowheight=24,
+            "Vault.TCombobox",
+            fieldbackground="#151a22",
+            background="#151a22",
+            foreground=TEXT,
+            arrowcolor=TEXT,
+            bordercolor=BORDER,
+            lightcolor="#151a22",
+            darkcolor="#151a22",
+            padding=(10, 6),
         )
-        style.map("Signals.Treeview", background=[("selected", "#1f2a44")])
-
-        style.configure(
-            "Signals.Treeview.Heading",
-            background="#0f1520",
-            foreground="#9fb4db",
-            relief="flat",
-            borderwidth=0,
-            font=("Segoe UI Semibold", 10),
-        )
-
-        style.configure(
-            "Signals.TCombobox",
-            fieldbackground="#1a2233",
-            background="#1a2233",
-            foreground="#f0f4ff",
-            arrowcolor="#f0f4ff",
-            borderwidth=0,
+        style.map(
+            "Vault.TCombobox",
+            fieldbackground=[("readonly", "#151a22")],
+            foreground=[("readonly", TEXT)],
+            selectbackground=[("readonly", "#151a22")],
+            selectforeground=[("readonly", TEXT)],
         )
 
-    def build_layout(self) -> None:
-        self.shell = tk.Frame(
-            self.root,
-            bg="#0b1019",
-            highlightthickness=1,
-            highlightbackground="#1f2a3c",
-        )
-        self.shell.pack(fill="both", expand=True, padx=10, pady=10)
+    def build_layout(self):
+        self.root.grid_rowconfigure(1, weight=1)
+        self.root.grid_columnconfigure(0, weight=1)
 
-        self.build_title_bar()
+        self.build_top_bar()
 
-        self.content = tk.Frame(self.shell, bg="#0d131f")
-        self.content.pack(fill="both", expand=True, padx=12, pady=(10, 12))
-        self.content.grid_columnconfigure(0, weight=0, minsize=280)
-        self.content.grid_columnconfigure(1, weight=1)
-        self.content.grid_rowconfigure(0, weight=1)
+        self.workspace = Frame(self.root, bg=BACKGROUND)
+        self.workspace.grid(row=1, column=0, sticky="nsew")
+        self.workspace.grid_rowconfigure(1, weight=1)
+        self.workspace.grid_columnconfigure(0, minsize=205)
+        self.workspace.grid_columnconfigure(1, weight=1)
+        self.workspace.grid_columnconfigure(2, minsize=265)
 
-        self.left_panel = tk.Frame(self.content, bg="#0f1625")
-        self.left_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
-
-        self.right_panel = tk.Frame(self.content, bg="#111a2a")
-        self.right_panel.grid(row=0, column=1, sticky="nsew")
-
-        self.build_notifications_panel()
-        self.build_account_panel()
-        self.build_sync_panel()
+        self.build_market_panel()
+        self.build_chart_workspace()
         self.build_signal_panel()
-        self.build_compact_settings_panel()
+        self.build_hover_navigation()
 
-    def build_title_bar(self) -> None:
-        self.title_bar = tk.Frame(self.shell, bg="#111722", height=48)
-        self.title_bar.pack(fill="x", padx=1, pady=1)
-        self.title_bar.pack_propagate(False)
-        self.title_bar.grid_columnconfigure(1, weight=1)
+    def build_top_bar(self):
+        top = Frame(self.root, bg="#090c10", height=62, highlightbackground=BORDER, highlightthickness=1)
+        top.grid(row=0, column=0, sticky="ew")
+        top.grid_propagate(False)
 
-        self.left_header_controls = tk.Frame(self.title_bar, bg="#111722")
-        self.left_header_controls.grid(row=0, column=0, sticky="w", padx=8)
+        brand = Frame(top, bg="#090c10")
+        brand.pack(side=LEFT, padx=(22, 26), pady=10)
+        if logo := self.create_scaled_logo(38):
+            Label(brand, image=logo, bg="#090c10").pack(side=LEFT, padx=(0, 9))
+        brand_text = Frame(brand, bg="#090c10")
+        brand_text.pack(side=LEFT)
+        Label(brand_text, text="VaultSignalsAI", fg=TEXT, bg="#090c10", font=("Segoe UI", 12, "bold")).pack(anchor="w")
+        Label(brand_text, textvariable=self.welcome_text, fg=MUTED, bg="#090c10", font=("Segoe UI", 8)).pack(anchor="w")
 
-        self.view_mode_var = tk.StringVar(value="Feed")
-
-        self.settings_button = self.make_header_button(
-            self.left_header_controls,
-            text="Settings",
-            command=self.focus_settings,
+        Label(top, text="FOLLOW MARKET", fg=MUTED, bg="#090c10", font=("Segoe UI", 8, "bold")).pack(side=LEFT, padx=(0, 8))
+        self.symbol_combo = ttk.Combobox(
+            top,
+            textvariable=self.follow_symbol,
+            values=SYMBOL_OPTIONS,
+            state="readonly",
+            width=12,
+            justify=CENTER,
+            style="Vault.TCombobox",
         )
-        self.settings_button.pack(side="left", padx=(0, 6), pady=8)
+        self.symbol_combo.pack(side=LEFT, pady=13)
+        self.symbol_combo.bind("<<ComboboxSelected>>", self.select_followed_asset)
+        self.create_button(top, "Browse", self.open_market_browser).pack(side=LEFT, padx=(8, 0), pady=12)
+        self.create_button(top, "Open", self.open_followed_asset, primary=True).pack(side=LEFT, padx=(8, 0), pady=12)
 
-        self.account_button = self.make_header_button(
-            self.left_header_controls,
-            text="Account",
-            command=self.focus_account,
+        self.live_badge = Label(
+            top,
+            text="ÔùÅ LIVE",
+            fg=GREEN,
+            bg="#090c10",
+            font=("Segoe UI", 9, "bold"),
         )
-        self.account_button.pack(side="left", padx=(0, 6), pady=8)
+        self.live_badge.pack(side=LEFT, padx=18)
 
-        self.compact_button = self.make_header_button(
-            self.left_header_controls,
-            text="Compact",
-            command=self.toggle_compact_mode,
-            width=10,
-        )
-        self.compact_button.pack(side="left", pady=8)
+        top_actions = Frame(top, bg="#090c10")
+        top_actions.pack(side=RIGHT, padx=16, pady=12)
+        self.update_button = self.create_button(top_actions, "Update", self.check_for_update)
+        self.update_button.pack(side=LEFT, padx=(0, 8))
+        self.fullscreen_button = self.create_button(top_actions, "Full screen", self.toggle_fullscreen)
+        self.fullscreen_button.pack(side=LEFT, padx=(0, 8))
+        self.create_button(top_actions, "Minimize", self.minimize_window).pack(side=LEFT, padx=(0, 8))
+        self.create_button(top_actions, "Close", self.close_window, danger=True).pack(side=LEFT)
 
-        self.title_label = tk.Label(
-            self.title_bar,
-            text=APP_NAME,
-            bg="#111722",
-            fg="#f2f5ff",
-            font=("Bahnschrift SemiBold", 15),
-        )
-        self.title_label.grid(row=0, column=1, sticky="nsew")
+    def build_market_panel(self):
+        panel = Frame(self.workspace, bg=PANEL, width=205, highlightbackground=BORDER, highlightthickness=1)
+        panel.grid(row=1, column=0, sticky="nsew")
+        panel.grid_propagate(False)
 
-        self.right_header_controls = tk.Frame(self.title_bar, bg="#111722")
-        self.right_header_controls.grid(row=0, column=2, sticky="e", padx=8)
+        header = Frame(panel, bg=PANEL)
+        header.pack(fill=X, padx=14, pady=(16, 10))
+        Label(header, text="ORDER BOOK", fg=TEXT, bg=PANEL, font=("Segoe UI", 9, "bold")).pack(side=LEFT)
+        Label(header, text="LIVE", fg=GREEN, bg=PANEL, font=("Segoe UI", 8, "bold")).pack(side=RIGHT)
 
-        self.pin_button = self.make_header_button(
-            self.right_header_controls,
-            text="Pin",
-            command=self.toggle_pin,
-            width=5,
-        )
-        self.pin_button.pack(side="left", padx=(0, 6), pady=8)
+        labels = Frame(panel, bg=PANEL)
+        labels.pack(fill=X, padx=14, pady=(0, 5))
+        Label(labels, text="PRICE", fg=MUTED, bg=PANEL, font=("Segoe UI", 7, "bold"), width=10, anchor="w").pack(side=LEFT)
+        Label(labels, text="AMOUNT", fg=MUTED, bg=PANEL, font=("Segoe UI", 7, "bold"), anchor="e").pack(side=RIGHT)
 
-        self.minimize_button = self.make_header_button(
-            self.right_header_controls,
-            text="-",
-            command=self.minimize_window,
-            width=4,
-        )
-        self.minimize_button.pack(side="left", padx=(0, 6), pady=8)
+        self.depth_container = Frame(panel, bg=PANEL)
+        self.depth_container.pack(fill=BOTH, expand=True, padx=14)
+        for index in range(12):
+            row = Frame(self.depth_container, bg=PANEL)
+            row.pack(fill=X, pady=1)
+            price = Label(row, text="--", fg=RED if index < 6 else GREEN, bg=PANEL, font=("Cascadia Mono", 8), anchor="w")
+            price.pack(side=LEFT)
+            amount = Label(row, text="--", fg="#b9c2cd", bg=PANEL, font=("Cascadia Mono", 8), anchor="e")
+            amount.pack(side=RIGHT)
+            self.depth_rows.append((price, amount))
 
-        self.close_button = tk.Button(
-            self.right_header_controls,
-            text="X",
-            width=4,
-            command=self.on_close,
-            bg="#312029",
-            activebackground="#b73755",
-            fg="#ffdce6",
+        footer = Frame(panel, bg="#0a0d11", height=72)
+        footer.pack(fill=X, side="bottom")
+        footer.pack_propagate(False)
+        Label(footer, text="DATA SOURCE", fg=MUTED, bg="#0a0d11", font=("Segoe UI", 7, "bold")).pack(anchor="w", padx=14, pady=(13, 0))
+        Label(footer, text="Public exchange market feed", fg="#c6d1dc", bg="#0a0d11", font=("Segoe UI", 8)).pack(anchor="w", padx=14, pady=(2, 0))
+
+    def build_chart_workspace(self):
+        chart_area = Frame(self.workspace, bg=BACKGROUND)
+        chart_area.grid(row=1, column=1, sticky="nsew")
+        chart_area.grid_rowconfigure(1, weight=1)
+        chart_area.grid_columnconfigure(0, weight=1)
+
+        toolbar = Frame(chart_area, bg="#090c10", height=43, highlightbackground=BORDER, highlightthickness=1)
+        toolbar.grid(row=0, column=0, sticky="ew")
+        toolbar.grid_propagate(False)
+        Label(toolbar, textvariable=self.market_name, fg=TEXT, bg="#090c10", font=("Segoe UI", 10, "bold")).pack(side=LEFT, padx=15)
+        Label(toolbar, text="1H", fg=BLUE, bg="#090c10", font=("Segoe UI", 9, "bold")).pack(side=LEFT, padx=(0, 16))
+        Label(toolbar, text="Candles", fg=MUTED, bg="#090c10", font=("Segoe UI", 8)).pack(side=LEFT, padx=(0, 16))
+        Label(toolbar, text="Volume", fg=MUTED, bg="#090c10", font=("Segoe UI", 8)).pack(side=LEFT, padx=(0, 16))
+        Label(toolbar, text="Signals", fg=MUTED, bg="#090c10", font=("Segoe UI", 8)).pack(side=LEFT)
+        self.zoom_label = Label(toolbar, text="", fg=MUTED, bg="#090c10", font=("Segoe UI", 8))
+        self.zoom_label.pack(side=RIGHT, padx=(0, 14))
+        self.create_chart_button(toolbar, "Reset", self.reset_chart_zoom).pack(side=RIGHT, padx=(0, 6), pady=7)
+        self.create_chart_button(toolbar, "´╝ï", self.zoom_in).pack(side=RIGHT, padx=(0, 4), pady=7)
+        self.create_chart_button(toolbar, "´╝ì", self.zoom_out).pack(side=RIGHT, padx=(0, 4), pady=7)
+        self.chart_status = Label(toolbar, text="Loading candles...", fg=MUTED, bg="#090c10", font=("Segoe UI", 8))
+        self.chart_status.pack(side=RIGHT, padx=(0, 14))
+
+        self.chart_canvas = Canvas(chart_area, bg=BACKGROUND, highlightthickness=0)
+        self.chart_canvas.grid(row=1, column=0, sticky="nsew")
+        self.chart_canvas.bind("<Configure>", lambda _event: self.draw_chart())
+        self.chart_canvas.bind("<MouseWheel>", self.on_chart_wheel)
+        self.chart_canvas.bind("<Button-4>", lambda _event: self.zoom_in())
+        self.chart_canvas.bind("<Button-5>", lambda _event: self.zoom_out())
+        self.chart_canvas.bind("<Motion>", self.on_chart_motion)
+        self.chart_canvas.bind("<Leave>", self.clear_chart_crosshair)
+
+        status = Frame(chart_area, bg="#090c10", height=31, highlightbackground=BORDER, highlightthickness=1)
+        status.grid(row=2, column=0, sticky="ew")
+        status.grid_propagate(False)
+        Label(status, textvariable=self.last_update, fg=MUTED, bg="#090c10", font=("Segoe UI", 8)).pack(side=LEFT, padx=15, pady=8)
+        Label(status, text=f"Version {self.app_version}", fg="#68737f", bg="#090c10", font=("Segoe UI", 8)).pack(side=RIGHT, padx=(0, 15), pady=8)
+        Label(status, text="Market data only ÔÇó Not investment advice", fg="#68737f", bg="#090c10", font=("Segoe UI", 8)).pack(side=RIGHT, padx=15, pady=8)
+
+    def build_signal_panel(self):
+        panel = Frame(self.workspace, bg=PANEL, width=265, highlightbackground=BORDER, highlightthickness=1)
+        panel.grid(row=1, column=2, sticky="nsew")
+        panel.grid_propagate(False)
+
+        Label(panel, text="LIVE MARKET READING", fg=TEXT, bg=PANEL, font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=16, pady=(17, 5))
+        self.signal_value = Label(panel, textvariable=self.signal_text, fg=BLUE, bg=PANEL, font=("Segoe UI", 22, "bold"))
+        self.signal_value.pack(anchor="w", padx=16)
+        Label(panel, textvariable=self.signal_detail, fg="#bdc8d4", bg=PANEL, wraplength=225, justify=LEFT, font=("Segoe UI", 9)).pack(anchor="w", padx=16, pady=(7, 18))
+
+        self.add_divider(panel)
+        self.add_stat(panel, "LAST PRICE", self.price_text, TEXT)
+        self.add_stat(panel, "24H OBSERVED CHANGE", self.change_text, GREEN)
+        self.add_stat(panel, "24H RANGE", self.range_text, TEXT)
+        self.add_stat(panel, "QUOTE VOLUME", self.volume_text, TEXT)
+        self.add_stat(panel, "MOMENTUM", self.momentum_text, BLUE)
+        self.add_stat(panel, "TREND", self.trend_text, TEXT)
+
+        self.add_divider(panel)
+        Label(panel, text="12H SCENARIO", fg=MUTED, bg=PANEL, font=("Segoe UI", 8, "bold")).pack(anchor="w", padx=16, pady=(12, 2))
+        self.add_stat(panel, "SCENARIO MIDPOINT", self.scenario_mid_text, BLUE)
+        self.add_stat(panel, "UPPER VOLATILITY BAND", self.scenario_upper_text, "#f5c95c")
+        self.add_stat(panel, "12H SCENARIO CHANGE", self.scenario_change_text, BLUE)
+        self.add_stat(panel, "SENTIMENT INPUT", self.social_sentiment_text, TEXT)
+
+        self.add_divider(panel)
+        Label(panel, text="HOW TO READ THIS", fg=MUTED, bg=PANEL, font=("Segoe UI", 8, "bold")).pack(anchor="w", padx=16, pady=(12, 4))
+        Label(
+            panel,
+            text="Observed changes and the scenario use public market inputs. Indicator strength is not a probability, prediction, target, or trading instruction.",
+            fg="#9ca8b6",
+            bg=PANEL,
+            wraplength=225,
+            justify=LEFT,
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", padx=16)
+
+    def build_hover_navigation(self):
+        self.nav = Frame(self.workspace, bg="#0d1117", width=228, highlightbackground="#29323e", highlightthickness=1)
+        self.nav.place(x=-228, y=40, relheight=1, height=-40)
+        self.nav.pack_propagate(False)
+
+        nav_header = Frame(self.nav, bg="#0d1117", height=56)
+        nav_header.pack(fill=X, padx=20, pady=(17, 10))
+        nav_header.pack_propagate(False)
+        Label(nav_header, text="NAVIGATION", fg=MUTED, bg="#0d1117", font=("Segoe UI", 8, "bold")).pack(anchor="w", pady=(6, 0))
+        Label(nav_header, text="Workspace", fg=TEXT, bg="#0d1117", font=("Segoe UI", 14, "bold")).pack(anchor="w")
+
+        self.add_nav_button("Crypto markets", self.show_crypto_markets)
+        self.add_nav_button("Scenario report", self.show_scenario_report)
+        self.add_nav_button("Learn & risk", self.show_learning_and_risk)
+        self.add_nav_button("Release checklist", self.show_release_checklist)
+        self.add_nav_button("Account", self.show_account)
+        self.add_nav_button("Settings", self.show_settings)
+
+        logo_footer = Frame(self.nav, bg="#090c10", height=84)
+        logo_footer.pack(fill=X, side="bottom")
+        logo_footer.pack_propagate(False)
+        Label(logo_footer, text="V", fg=BLUE, bg="#090c10", font=("Segoe UI", 21, "bold")).pack(anchor="w", padx=20, pady=(12, 0))
+        Label(logo_footer, text="VAULTSIGNALSAI", fg="#d6e0eb", bg="#090c10", font=("Segoe UI", 8, "bold")).pack(anchor="w", padx=20)
+        Label(logo_footer, text="LIVE MARKET WORKSPACE", fg="#64717f", bg="#090c10", font=("Segoe UI", 6, "bold")).pack(anchor="w", padx=20)
+
+        self.nav_toggle = Button(
+            self.workspace,
+            text="ÔÇ║",
+            command=self.toggle_navigation,
+            fg="#e5edf6",
+            bg="#161d26",
             activeforeground="#ffffff",
+            activebackground="#26313f",
             relief="flat",
-            bd=0,
-            highlightthickness=0,
-            font=("Segoe UI Semibold", 10),
+            borderwidth=0,
             cursor="hand2",
+            font=("Segoe UI", 16, "bold"),
+            width=2,
+            height=1,
+            takefocus=True,
+            highlightthickness=1,
+            highlightbackground="#324052",
+            highlightcolor="#8badff",
         )
-        self.close_button.pack(side="left", pady=8)
+        self.nav_toggle.place(x=14, y=40, width=34, height=34)
+        self.nav_toggle.lift()
 
-        for drag_widget in (self.title_bar, self.title_label):
-            drag_widget.bind("<ButtonPress-1>", self.start_drag)
-            drag_widget.bind("<B1-Motion>", self.drag_window)
+    def add_nav_button(self, label, command):
+        button = Button(
+            self.nav,
+            text=label,
+            command=command,
+            fg="#cbd6e2",
+            bg="#10151d",
+            activeforeground="#ffffff",
+            activebackground=PANEL_HOVER,
+            relief="flat",
+            borderwidth=0,
+            cursor="hand2",
+            font=("Segoe UI", 10, "bold"),
+            anchor="w",
+            padx=20,
+            pady=11,
+            takefocus=True,
+            highlightthickness=1,
+            highlightbackground="#0d1117",
+            highlightcolor="#8badff",
+        )
+        button.pack(fill=X, padx=10, pady=2)
 
-    def make_header_button(
-        self,
-        parent: tk.Widget,
-        text: str,
-        command,
-        width: int = 8,
-    ) -> tk.Button:
-        return tk.Button(
+    def create_button(self, parent, text, command, primary=False, danger=False):
+        background = RED if danger else BLUE if primary else "#171d26"
+        active = "#ff7180" if danger else "#7da3ff" if primary else "#252f3d"
+        return Button(
             parent,
             text=text,
-            width=width,
             command=command,
-            bg="#1b2434",
-            activebackground="#2c3a54",
-            fg="#dbe7ff",
+            fg="#ffffff" if primary or danger else "#d6e0eb",
+            bg=background,
             activeforeground="#ffffff",
+            activebackground=active,
             relief="flat",
-            bd=0,
-            highlightthickness=0,
-            font=("Segoe UI Semibold", 9),
+            borderwidth=0,
             cursor="hand2",
-        )
-
-    def build_notifications_panel(self) -> None:
-        self.notifications_card = tk.Frame(
-            self.left_panel,
-            bg="#111a2b",
+            font=("Segoe UI", 9, "bold"),
+            padx=13,
+            pady=7,
+            takefocus=True,
             highlightthickness=1,
-            highlightbackground="#263350",
-        )
-        self.notifications_card.pack(fill="x", padx=12, pady=(12, 8))
-
-        header = tk.Frame(self.notifications_card, bg="#111a2b")
-        header.pack(fill="x", padx=12, pady=(12, 8))
-
-        tk.Label(
-            header,
-            text="Website Notifications",
-            bg="#111a2b",
-            fg="#f2f5ff",
-            font=("Segoe UI Semibold", 13),
-        ).pack(side="left")
-
-        tk.Button(
-            header,
-            text="Clear",
-            command=self.clear_notifications,
-            bg="#2f3240",
-            activebackground="#50576d",
-            fg="#d7dded",
-            relief="flat",
-            bd=0,
-            padx=10,
-            pady=5,
-            font=("Segoe UI Semibold", 8),
-            cursor="hand2",
-        ).pack(side="right")
-
-        list_wrap = tk.Frame(self.notifications_card, bg="#111a2b")
-        list_wrap.pack(fill="both", expand=True, padx=12, pady=(0, 12))
-
-        self.notification_list = tk.Listbox(
-            list_wrap,
-            bg="#0f1521",
-            fg="#dbe7ff",
-            selectbackground="#1f2a44",
-            selectforeground="#ffffff",
-            relief="flat",
-            bd=0,
-            highlightthickness=1,
-            highlightbackground="#2e3d5c",
-            font=("Consolas", 9),
-            activestyle="none",
-            exportselection=False,
-            height=10,
-        )
-        self.notification_list.pack(side="left", fill="both", expand=True)
-        self.notification_list.insert(
-            "end",
-            "Waiting for website signals. Start sync after account login.",
+            highlightbackground="#2a3442",
+            highlightcolor="#8badff",
         )
 
-    def clear_notifications(self) -> None:
-        self.notification_list.delete(0, "end")
-
-    def apply_navigation_view(self, view_name: str | None = None, announce: bool = False) -> None:
-        selected_view = str(view_name or "Feed").strip().title()
-        if selected_view not in VIEW_MODES:
-            selected_view = "Feed"
-
-        if self.view_mode_var.get() != selected_view:
-            self.view_mode_var.set(selected_view)
-
-        if self.config.compact_mode:
-            return
-
-        if selected_view == "Feed":
-            self.right_panel.grid(row=0, column=1, sticky="nsew")
-            self.left_panel.grid(row=0, column=0, columnspan=1, sticky="nsew", padx=(0, 12))
-            self.content.grid_columnconfigure(0, weight=0, minsize=280)
-            self.content.grid_columnconfigure(1, weight=1, minsize=0)
-            self.notifications_card.pack_forget()
-            self.account_card.pack_forget()
-            self.settings_card.pack_forget()
-            self.notifications_card.pack(fill="x", padx=12, pady=(12, 8))
-            self.settings_card.pack(fill="both", expand=True, padx=12, pady=(8, 12))
-        elif selected_view == "Account":
-            self.right_panel.grid_remove()
-            self.left_panel.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=0)
-            self.content.grid_columnconfigure(0, weight=1, minsize=0)
-            self.content.grid_columnconfigure(1, weight=0, minsize=0)
-            self.notifications_card.pack_forget()
-            self.account_card.pack_forget()
-            self.settings_card.pack_forget()
-            self.account_card.pack(fill="both", expand=True, padx=12, pady=12)
-        else:
-            self.right_panel.grid_remove()
-            self.left_panel.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=0)
-            self.content.grid_columnconfigure(0, weight=1, minsize=0)
-            self.content.grid_columnconfigure(1, weight=0, minsize=0)
-            self.notifications_card.pack_forget()
-            self.account_card.pack_forget()
-            self.settings_card.pack_forget()
-            self.settings_card.pack(fill="both", expand=True, padx=12, pady=12)
-
-        if announce:
-            self.status_var.set(f"{selected_view} view enabled.")
-
-    def build_account_panel(self) -> None:
-        self.account_card = tk.Frame(
-            self.left_panel,
-            bg="#111a2b",
-            highlightthickness=1,
-            highlightbackground="#263350",
-        )
-        self.account_card.pack(fill="x", padx=12, pady=(12, 8))
-
-        tk.Label(
-            self.account_card,
-            text="Client Account",
-            bg="#111a2b",
-            fg="#f2f5ff",
-            font=("Segoe UI Semibold", 13),
-        ).pack(anchor="w", padx=12, pady=(12, 2))
-
-        tk.Label(
-            self.account_card,
-            text="Login is required before auto-sync can run.",
-            bg="#111a2b",
-            fg="#8fa4cb",
-            font=("Segoe UI", 9),
-        ).pack(anchor="w", padx=12, pady=(0, 10))
-
-        self.website_url_var = tk.StringVar(value=self.config.website_url)
-        self.username_var = tk.StringVar(value=self.config.username)
-        self.password_var = tk.StringVar(value="")
-        self.account_status_var = tk.StringVar(value="Not logged in")
-
-        self.website_entry = self.add_labeled_entry(
-            self.account_card,
-            "Website URL",
-            self.website_url_var,
-        )
-        self.username_entry = self.add_labeled_entry(
-            self.account_card,
-            "Client Username",
-            self.username_var,
-        )
-        self.password_entry = self.add_labeled_entry(
-            self.account_card,
-            "Password",
-            self.password_var,
-            show="*",
-        )
-
-        button_row = tk.Frame(self.account_card, bg="#111a2b")
-        button_row.pack(fill="x", padx=12, pady=(10, 4))
-
-        self.login_button = tk.Button(
-            button_row,
-            text="Login",
-            command=self.login_to_website,
-            bg="#204c78",
-            activebackground="#2a659c",
-            fg="#eaf3ff",
+    @staticmethod
+    def create_chart_button(parent, text, command):
+        return Button(
+            parent,
+            text=text,
+            command=command,
+            fg="#cbd6e2",
+            bg="#151a22",
             activeforeground="#ffffff",
+            activebackground="#252f3d",
             relief="flat",
-            bd=0,
-            padx=12,
-            pady=7,
-            font=("Segoe UI Semibold", 9),
+            borderwidth=0,
             cursor="hand2",
-        )
-        self.login_button.pack(side="left", padx=(0, 8))
-
-        self.logout_button = tk.Button(
-            button_row,
-            text="Logout",
-            command=self.logout_client,
-            bg="#2f3240",
-            activebackground="#50576d",
-            fg="#d7dded",
-            relief="flat",
-            bd=0,
-            padx=12,
-            pady=7,
-            font=("Segoe UI Semibold", 9),
-            cursor="hand2",
-        )
-        self.logout_button.pack(side="left")
-
-        tk.Label(
-            self.account_card,
-            textvariable=self.account_status_var,
-            bg="#111a2b",
-            fg="#9fd4aa",
-            font=("Segoe UI", 9),
-            wraplength=300,
-            justify="left",
-        ).pack(anchor="w", padx=12, pady=(6, 12))
-
-    def build_sync_panel(self) -> None:
-        self.settings_card = tk.Frame(
-            self.left_panel,
-            bg="#111a2b",
+            font=("Segoe UI", 8, "bold"),
+            padx=8,
+            pady=4,
+            takefocus=True,
             highlightthickness=1,
-            highlightbackground="#263350",
-        )
-        self.settings_card.pack(fill="both", expand=True, padx=12, pady=(8, 12))
-
-        tk.Label(
-            self.settings_card,
-            text="Signal Sync Settings",
-            bg="#111a2b",
-            fg="#f2f5ff",
-            font=("Segoe UI Semibold", 13),
-        ).pack(anchor="w", padx=12, pady=(12, 8))
-
-        self.discord_webhook_var = tk.StringVar(value=self.config.discord_webhook)
-        self.discord_entry = self.add_labeled_entry(
-            self.settings_card,
-            "Discord Webhook URL",
-            self.discord_webhook_var,
+            highlightbackground="#283341",
+            highlightcolor="#8badff",
         )
 
-        market_row = tk.Frame(self.settings_card, bg="#111a2b")
-        market_row.pack(fill="x", padx=12, pady=(8, 0))
-
-        tk.Label(
-            market_row,
-            text="Market",
-            bg="#111a2b",
-            fg="#9fb4db",
-            font=("Segoe UI", 9),
-        ).pack(anchor="w")
-
-        self.market_var = tk.StringVar(value=self.config.market)
-        self.market_combo = ttk.Combobox(
-            market_row,
-            textvariable=self.market_var,
-            values=MARKETS,
-            state="readonly",
-            style="Signals.TCombobox",
-        )
-        self.market_combo.pack(fill="x", pady=(4, 0))
-
-        self.sync_seconds_var = tk.StringVar(value=str(self.config.sync_seconds))
-        self.add_labeled_entry(
-            self.settings_card,
-            "Auto Sync Interval (seconds)",
-            self.sync_seconds_var,
-        )
-
-        self.in_app_notify_var = tk.BooleanVar(value=self.config.in_app_notifications)
-        self.windows_notify_var = tk.BooleanVar(value=self.config.windows_notifications)
-
-        check_row = tk.Frame(self.settings_card, bg="#111a2b")
-        check_row.pack(fill="x", padx=12, pady=(10, 0))
-
-        in_app_check = tk.Checkbutton(
-            check_row,
-            text="In-app notifications",
-            variable=self.in_app_notify_var,
-            bg="#111a2b",
-            fg="#dbe7ff",
-            activebackground="#111a2b",
-            activeforeground="#dbe7ff",
-            selectcolor="#1f2a40",
-            font=("Segoe UI", 9),
-        )
-        in_app_check.pack(anchor="w")
-
-        windows_check = tk.Checkbutton(
-            check_row,
-            text="Windows notifications",
-            variable=self.windows_notify_var,
-            bg="#111a2b",
-            fg="#dbe7ff",
-            activebackground="#111a2b",
-            activeforeground="#dbe7ff",
-            selectcolor="#1f2a40",
-            font=("Segoe UI", 9),
-        )
-        windows_check.pack(anchor="w", pady=(2, 0))
-
-        controls = tk.Frame(self.settings_card, bg="#111a2b")
-        controls.pack(fill="x", padx=12, pady=(12, 4))
-
-        self.start_button = tk.Button(
-            controls,
-            text="Start Auto Sync",
-            command=self.start_auto_sync,
-            bg="#1f7a48",
-            activebackground="#299f5d",
-            fg="#f0fff7",
-            relief="flat",
-            bd=0,
-            padx=12,
-            pady=8,
-            font=("Segoe UI Semibold", 9),
-            cursor="hand2",
-        )
-        self.start_button.pack(side="left", padx=(0, 8))
-
-        self.stop_button = tk.Button(
-            controls,
-            text="Stop",
-            command=self.stop_auto_sync,
-            state="disabled",
-            bg="#4a2d34",
-            activebackground="#6f404b",
-            fg="#ffe7ed",
-            relief="flat",
-            bd=0,
-            padx=12,
-            pady=8,
-            font=("Segoe UI Semibold", 9),
-            cursor="hand2",
-        )
-        self.stop_button.pack(side="left")
-
-    def build_signal_panel(self) -> None:
-        top_row = tk.Frame(self.right_panel, bg="#111a2a")
-        top_row.pack(fill="x", padx=14, pady=(14, 10))
-
-        tk.Label(
-            top_row,
-            text="Live Signal Feed",
-            bg="#111a2a",
-            fg="#f2f5ff",
-            font=("Segoe UI Semibold", 14),
-        ).pack(side="left")
-
-        tk.Button(
-            top_row,
-            text="Send Test Signal",
-            command=self.send_test_signal,
-            bg="#2b436f",
-            activebackground="#3a5a8f",
-            fg="#eff4ff",
-            relief="flat",
-            bd=0,
-            padx=11,
-            pady=6,
-            font=("Segoe UI Semibold", 9),
-            cursor="hand2",
-        ).pack(side="right")
-
-        table_wrap = tk.Frame(self.right_panel, bg="#111a2a")
-        table_wrap.pack(fill="both", expand=True, padx=14)
-
-        columns = ("time", "market", "symbol", "signal", "price", "delivery")
-        self.signal_tree = ttk.Treeview(
-            table_wrap,
-            columns=columns,
-            show="headings",
-            style="Signals.Treeview",
-        )
-
-        headings = {
-            "time": "Time",
-            "market": "Market",
-            "symbol": "Symbol",
-            "signal": "Signal",
-            "price": "Price",
-            "delivery": "Delivery",
+    @staticmethod
+    def load_local_settings():
+        defaults = {
+            "display_name": MarketSignalApp.get_local_user_name(),
+            "default_symbol": DEFAULT_SYMBOL,
+            "refresh_seconds": REFRESH_INTERVAL_SECONDS,
+            "show_splash": True,
+            "start_fullscreen": False,
+            "alerts_enabled": True,
+            "alert_threshold_percent": 8,
+            "favorite_symbols": [],
+            "show_scenario_overlay": True,
+            "social_sentiment_url": "",
+            "discord_contact": "",
+            "discord_tier": "Unverified",
+            "discord_market_updates_opt_in": False,
+            "restrict_alerts_to_favorites": False,
+            "release_todo_status": {},
         }
-        widths = {
-            "time": 108,
-            "market": 92,
-            "symbol": 92,
-            "signal": 88,
-            "price": 100,
-            "delivery": 180,
-        }
-
-        for key in columns:
-            self.signal_tree.heading(key, text=headings[key])
-            self.signal_tree.column(key, width=widths[key], anchor="center")
-
-        scrollbar = ttk.Scrollbar(table_wrap, orient="vertical", command=self.signal_tree.yview)
-        self.signal_tree.configure(yscrollcommand=scrollbar.set)
-
-        self.signal_tree.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        self.signal_tree.bind("<MouseWheel>", self.on_signal_mousewheel)
-        self.signal_tree.bind("<Button-4>", self.on_signal_scroll_up)
-        self.signal_tree.bind("<Button-5>", self.on_signal_scroll_down)
-
-        self.status_var = tk.StringVar(value="Ready. Login to start auto-sync.")
-        status_bar = tk.Label(
-            self.right_panel,
-            textvariable=self.status_var,
-            bg="#0f1624",
-            fg="#90a8d4",
-            anchor="w",
-            padx=12,
-            pady=8,
-            font=("Segoe UI", 9),
-        )
-        status_bar.pack(fill="x", padx=14, pady=(10, 14))
-
-    def build_compact_settings_panel(self) -> None:
-        self.compact_settings_panel = tk.Frame(
-            self.content,
-            bg="#111a2a",
-            highlightthickness=1,
-            highlightbackground="#253554",
-        )
-        self.compact_settings_panel.grid(
-            row=0,
-            column=0,
-            columnspan=2,
-            sticky="nsew",
-        )
-        self.compact_settings_panel.grid_remove()
-
-        header = tk.Frame(self.compact_settings_panel, bg="#111a2a")
-        header.pack(fill="x", padx=16, pady=(14, 10))
-
-        tk.Label(
-            header,
-            text="Compact Settings",
-            bg="#111a2a",
-            fg="#f2f5ff",
-            font=("Segoe UI Semibold", 14),
-        ).pack(anchor="w")
-
-        tk.Label(
-            header,
-            text="Quick account + sync controls in a tighter layout.",
-            bg="#111a2a",
-            fg="#8fa6d2",
-            font=("Segoe UI", 9),
-        ).pack(anchor="w", pady=(2, 0))
-
-        account_row = tk.Frame(self.compact_settings_panel, bg="#111a2a")
-        account_row.pack(fill="x", padx=16, pady=(0, 8))
-        account_row.grid_columnconfigure(0, weight=2)
-        account_row.grid_columnconfigure(1, weight=1)
-        account_row.grid_columnconfigure(2, weight=1)
-
-        self.compact_website_entry = self.make_compact_entry(
-            account_row,
-            "Website",
-            self.website_url_var,
-            row=0,
-            column=0,
-            sticky="ew",
-            padx=(0, 8),
-        )
-        self.compact_username_entry = self.make_compact_entry(
-            account_row,
-            "Username",
-            self.username_var,
-            row=0,
-            column=1,
-            sticky="ew",
-            padx=(0, 8),
-        )
-        self.compact_password_entry = self.make_compact_entry(
-            account_row,
-            "Password",
-            self.password_var,
-            row=0,
-            column=2,
-            sticky="ew",
-            show="*",
-        )
-
-        account_actions = tk.Frame(self.compact_settings_panel, bg="#111a2a")
-        account_actions.pack(fill="x", padx=16, pady=(0, 8))
-
-        tk.Button(
-            account_actions,
-            text="Login",
-            command=self.login_to_website,
-            bg="#204c78",
-            activebackground="#2a659c",
-            fg="#eaf3ff",
-            activeforeground="#ffffff",
-            relief="flat",
-            bd=0,
-            padx=12,
-            pady=7,
-            font=("Segoe UI Semibold", 9),
-            cursor="hand2",
-        ).pack(side="left", padx=(0, 8))
-
-        tk.Button(
-            account_actions,
-            text="Logout",
-            command=self.logout_client,
-            bg="#2f3240",
-            activebackground="#50576d",
-            fg="#d7dded",
-            relief="flat",
-            bd=0,
-            padx=12,
-            pady=7,
-            font=("Segoe UI Semibold", 9),
-            cursor="hand2",
-        ).pack(side="left")
-
-        sync_row = tk.Frame(self.compact_settings_panel, bg="#111a2a")
-        sync_row.pack(fill="x", padx=16, pady=(0, 8))
-        sync_row.grid_columnconfigure(0, weight=2)
-        sync_row.grid_columnconfigure(1, weight=0)
-        sync_row.grid_columnconfigure(2, weight=0)
-
-        self.compact_discord_entry = self.make_compact_entry(
-            sync_row,
-            "Discord Webhook",
-            self.discord_webhook_var,
-            row=0,
-            column=0,
-            sticky="ew",
-            padx=(0, 8),
-        )
-
-        market_wrap = tk.Frame(sync_row, bg="#111a2a")
-        market_wrap.grid(row=0, column=1, sticky="ew", padx=(0, 8))
-        tk.Label(
-            market_wrap,
-            text="Market",
-            bg="#111a2a",
-            fg="#8ea6d3",
-            font=("Segoe UI", 9),
-        ).pack(anchor="w")
-        self.compact_market_combo = ttk.Combobox(
-            market_wrap,
-            textvariable=self.market_var,
-            values=MARKETS,
-            state="readonly",
-            style="Signals.TCombobox",
-            width=12,
-        )
-        self.compact_market_combo.pack(fill="x", pady=(3, 0))
-
-        self.compact_seconds_entry = self.make_compact_entry(
-            sync_row,
-            "Second",
-            self.sync_seconds_var,
-            row=0,
-            column=2,
-            width=9,
-        )
-
-        sync_actions = tk.Frame(self.compact_settings_panel, bg="#111a2a")
-        sync_actions.pack(fill="x", padx=16, pady=(0, 8))
-
-        self.compact_toggle_button = tk.Button(
-            sync_actions,
-            text="Start Sync",
-            command=self.toggle_sync_from_compact,
-            bg="#1f7a48",
-            activebackground="#299f5d",
-            fg="#f0fff7",
-            relief="flat",
-            bd=0,
-            padx=14,
-            pady=8,
-            font=("Segoe UI Semibold", 9),
-            cursor="hand2",
-        )
-        self.compact_toggle_button.pack(side="left", padx=(0, 8))
-
-        tk.Button(
-            sync_actions,
-            text="Send Test Signal",
-            command=self.send_test_signal,
-            bg="#2b436f",
-            activebackground="#3a5a8f",
-            fg="#eff4ff",
-            relief="flat",
-            bd=0,
-            padx=12,
-            pady=8,
-            font=("Segoe UI Semibold", 9),
-            cursor="hand2",
-        ).pack(side="left")
-
-        notify_row = tk.Frame(self.compact_settings_panel, bg="#111a2a")
-        notify_row.pack(fill="x", padx=16, pady=(0, 8))
-
-        tk.Checkbutton(
-            notify_row,
-            text="In-app notifications",
-            variable=self.in_app_notify_var,
-            bg="#111a2a",
-            fg="#dbe7ff",
-            activebackground="#111a2a",
-            activeforeground="#dbe7ff",
-            selectcolor="#1f2a40",
-            font=("Segoe UI", 9),
-        ).pack(side="left", padx=(0, 12))
-
-        tk.Checkbutton(
-            notify_row,
-            text="Windows notifications",
-            variable=self.windows_notify_var,
-            bg="#111a2a",
-            fg="#dbe7ff",
-            activebackground="#111a2a",
-            activeforeground="#dbe7ff",
-            selectcolor="#1f2a40",
-            font=("Segoe UI", 9),
-        ).pack(side="left")
-
-        status_wrap = tk.Frame(self.compact_settings_panel, bg="#111a2a")
-        status_wrap.pack(fill="x", padx=16, pady=(0, 14))
-
-        tk.Label(
-            status_wrap,
-            textvariable=self.account_status_var,
-            bg="#111a2a",
-            fg="#9fd4aa",
-            anchor="w",
-            font=("Segoe UI", 9),
-        ).pack(fill="x")
-
-        tk.Label(
-            status_wrap,
-            textvariable=self.status_var,
-            bg="#111a2a",
-            fg="#90a8d4",
-            anchor="w",
-            font=("Segoe UI", 9),
-        ).pack(fill="x", pady=(2, 0))
-
-    def make_compact_entry(
-        self,
-        parent: tk.Widget,
-        label_text: str,
-        text_var: tk.StringVar,
-        row: int,
-        column: int,
-        sticky: str = "w",
-        padx: tuple[int, int] | int = (0, 0),
-        width: int = 16,
-        show: str | None = None,
-    ) -> tk.Entry:
-        wrap = tk.Frame(parent, bg="#111a2a")
-        wrap.grid(row=row, column=column, sticky=sticky, padx=padx)
-
-        tk.Label(
-            wrap,
-            text=label_text,
-            bg="#111a2a",
-            fg="#8ea6d3",
-            font=("Segoe UI", 9),
-        ).pack(anchor="w")
-
-        entry = tk.Entry(
-            wrap,
-            textvariable=text_var,
-            show=show,
-            width=width,
-            bg="#1a2233",
-            fg="#f4f7ff",
-            insertbackground="#f4f7ff",
-            relief="flat",
-            bd=0,
-            highlightthickness=1,
-            highlightbackground="#2e3d5c",
-            highlightcolor="#4a6faa",
-            font=("Segoe UI", 10),
-        )
-        entry.pack(fill="x", pady=(3, 0), ipady=6)
-        return entry
-
-    def add_labeled_entry(
-        self,
-        parent: tk.Widget,
-        label_text: str,
-        text_var: tk.StringVar,
-        show: str | None = None,
-    ) -> tk.Entry:
-        wrapper = tk.Frame(parent, bg="#111a2b")
-        wrapper.pack(fill="x", padx=12, pady=(8, 0))
-
-        tk.Label(
-            wrapper,
-            text=label_text,
-            bg="#111a2b",
-            fg="#9fb4db",
-            font=("Segoe UI", 9),
-        ).pack(anchor="w")
-
-        entry = tk.Entry(
-            wrapper,
-            textvariable=text_var,
-            show=show,
-            bg="#1a2233",
-            fg="#f4f7ff",
-            insertbackground="#f4f7ff",
-            relief="flat",
-            bd=0,
-            highlightthickness=1,
-            highlightbackground="#2e3d5c",
-            highlightcolor="#4a6faa",
-            font=("Segoe UI", 10),
-        )
-        entry.pack(fill="x", pady=(4, 0), ipady=7)
-        return entry
-
-    def restore_state_from_config(self) -> None:
-        if self.config.compact_mode:
-            self.set_compact_mode(True)
-        else:
-            self.apply_navigation_view("Feed")
-
-    def start_drag(self, event: tk.Event) -> None:
-        self.drag_offset_x = event.x
-        self.drag_offset_y = event.y
-
-    def drag_window(self, _event: tk.Event) -> None:
-        x = self.root.winfo_pointerx() - self.drag_offset_x
-        y = self.root.winfo_pointery() - self.drag_offset_y
-        self.root.geometry(f"+{x}+{y}")
-
-    def on_map_event(self, _event: tk.Event) -> None:
-        if TASKBAR_SAFE_MODE:
-            return
-        if self.root.state() == "normal":
-            self.root.overrideredirect(True)
-            self.enable_alt_tab_visibility()
-
-    def enable_alt_tab_visibility(self) -> None:
-        if TASKBAR_SAFE_MODE:
-            return
-        if ctypes is None:
-            return
-
         try:
-            user32 = ctypes.windll.user32
-            hwnd = self.root.winfo_id()
+            saved = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            saved = {}
 
-            gwl_exstyle = -20
-            ws_ex_appwindow = 0x00040000
-            ws_ex_toolwindow = 0x00000080
+        if isinstance(saved, dict):
+            defaults.update({key: value for key, value in saved.items() if key in defaults})
+        if not isinstance(defaults["default_symbol"], str) or not defaults["default_symbol"].isalpha():
+            defaults["default_symbol"] = DEFAULT_SYMBOL
+        if defaults["refresh_seconds"] not in (1, 2, 5):
+            defaults["refresh_seconds"] = REFRESH_INTERVAL_SECONDS
+        if defaults["alert_threshold_percent"] not in (5, 8, 10):
+            defaults["alert_threshold_percent"] = 8
+        defaults["display_name"] = str(defaults["display_name"]).strip() or MarketSignalApp.get_local_user_name()
+        defaults["show_splash"] = bool(defaults["show_splash"])
+        defaults["start_fullscreen"] = bool(defaults["start_fullscreen"])
+        defaults["alerts_enabled"] = bool(defaults["alerts_enabled"])
+        defaults["show_scenario_overlay"] = bool(defaults["show_scenario_overlay"])
+        if not isinstance(defaults["favorite_symbols"], list):
+            defaults["favorite_symbols"] = []
+        defaults["favorite_symbols"] = sorted(
+            {symbol.upper() for symbol in defaults["favorite_symbols"] if isinstance(symbol, str) and symbol.isalpha()}
+        )
+        if not isinstance(defaults["social_sentiment_url"], str) or not defaults["social_sentiment_url"].startswith("https://"):
+            defaults["social_sentiment_url"] = ""
+        if not isinstance(defaults["release_todo_status"], dict):
+            defaults["release_todo_status"] = {}
+        defaults["release_todo_status"] = {
+            key: bool(defaults["release_todo_status"].get(key, False))
+            for key in RELEASE_TODO_KEYS
+        }
+        defaults["discord_contact"] = str(defaults.get("discord_contact", "")).strip()[:80]
+        defaults["discord_tier"] = str(defaults.get("discord_tier", "")).strip()[:40] or "Unverified"
+        defaults["discord_market_updates_opt_in"] = bool(defaults.get("discord_market_updates_opt_in", False))
+        defaults["restrict_alerts_to_favorites"] = bool(defaults.get("restrict_alerts_to_favorites", False))
+        return defaults
 
-            ex_style = user32.GetWindowLongW(hwnd, gwl_exstyle)
-            updated_style = (ex_style & ~ws_ex_toolwindow) | ws_ex_appwindow
+    @staticmethod
+    def resource_path(relative_path):
+        base_path = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+        return base_path / relative_path
 
-            if updated_style != ex_style:
-                user32.SetWindowLongW(hwnd, gwl_exstyle, updated_style)
-
-            if not self.appwindow_style_ready:
-                self.appwindow_style_ready = True
-                self.root.withdraw()
-                self.root.after(25, self.root.deiconify)
+    def load_brand_assets(self):
+        logo_path = self.resource_path(LOGO_RELATIVE_PATH)
+        if not logo_path.is_file():
+            return
+        try:
+            self.logo_image = PhotoImage(file=str(logo_path))
+            self.root.iconphoto(True, self.logo_image)
         except Exception:
-            return
+            self.logo_image = None
 
-    def minimize_window(self) -> None:
-        if not TASKBAR_SAFE_MODE:
-            self.root.overrideredirect(False)
-        self.root.iconify()
-
-    def toggle_pin(self) -> None:
-        is_pinned = bool(self.root.attributes("-topmost"))
-        next_value = not is_pinned
-        self.root.attributes("-topmost", next_value)
-        self.pin_button.configure(text="Unpin" if next_value else "Pin")
-
-    def toggle_compact_mode(self) -> None:
-        self.set_compact_mode(not self.config.compact_mode)
-
-    def toggle_sync_from_compact(self) -> None:
-        if self.sync_running:
-            self.stop_auto_sync()
-        else:
-            self.start_auto_sync()
-
-    def set_compact_mode(self, compact_mode: bool) -> None:
-        self.config.compact_mode = compact_mode
-        if compact_mode:
-            self.left_panel.grid_remove()
-            self.right_panel.grid_remove()
-            self.compact_settings_panel.grid()
-            self.compact_button.configure(text="Expanded")
-            self.root.minsize(*COMPACT_WINDOW_MINSIZE)
-            self.root.geometry(COMPACT_WINDOW_GEOMETRY)
-            self.status_var.set("Compact settings mode enabled.")
-        else:
-            self.compact_settings_panel.grid_remove()
-            self.compact_button.configure(text="Compact")
-            self.apply_navigation_view(self.view_mode_var.get())
-            self.root.minsize(*FULL_WINDOW_MINSIZE)
-            self.root.geometry(FULL_WINDOW_GEOMETRY)
-            self.status_var.set("Full mode enabled.")
-        save_config(self.collect_config())
-
-    def focus_settings(self) -> None:
-        if self.config.compact_mode:
-            self.compact_discord_entry.focus_set()
-        else:
-            next_view = "Feed" if self.view_mode_var.get() == "Settings" else "Settings"
-            self.view_mode_var.set(next_view)
-            self.apply_navigation_view(next_view, announce=True)
-            self.discord_entry.focus_set()
-        if self.view_mode_var.get() == "Feed":
-            self.status_var.set("Feed view enabled.")
-        else:
-            self.status_var.set("Settings focused.")
-
-    def focus_account(self) -> None:
-        if self.config.compact_mode:
-            self.compact_username_entry.focus_set()
-        else:
-            next_view = "Feed" if self.view_mode_var.get() == "Account" else "Account"
-            self.view_mode_var.set(next_view)
-            self.apply_navigation_view(next_view, announce=True)
-            self.username_entry.focus_set()
-        if self.view_mode_var.get() == "Feed":
-            self.status_var.set("Feed view enabled.")
-        else:
-            self.status_var.set("Account focused.")
-
-    def set_sync_button_states(self, is_running: bool) -> None:
-        self.start_button.configure(state="disabled" if is_running else "normal")
-        self.stop_button.configure(state="normal" if is_running else "disabled")
-
-        if hasattr(self, "compact_toggle_button"):
-            if is_running:
-                self.compact_toggle_button.configure(
-                    text="Stop Sync",
-                    bg="#4a2d34",
-                    activebackground="#6f404b",
-                    fg="#ffe7ed",
-                )
-            else:
-                self.compact_toggle_button.configure(
-                    text="Start Sync",
-                    bg="#1f7a48",
-                    activebackground="#299f5d",
-                    fg="#f0fff7",
-                )
-
-    def collect_config(self) -> ClientConfig:
-        config = ClientConfig(
-            website_url=self.website_url_var.get().strip() or "http://127.0.0.1:5000",
-            username=self.username_var.get().strip(),
-            discord_webhook=self.discord_webhook_var.get().strip(),
-            market=self.market_var.get().strip().upper() if self.market_var.get() else "NASDAQ",
-            sync_seconds=self.read_sync_seconds(default_value=self.config.sync_seconds),
-            compact_mode=self.config.compact_mode,
-            windows_notifications=bool(self.windows_notify_var.get()),
-            in_app_notifications=bool(self.in_app_notify_var.get()),
-        )
-        if config.market not in MARKETS:
-            config.market = "NASDAQ"
-        return config
-
-    def read_sync_seconds(self, default_value: int = 30) -> int:
-        raw = self.sync_seconds_var.get().strip()
+    def load_app_version(self):
+        version_path = self.resource_path(VERSION_RELATIVE_PATH)
         try:
-            value = int(raw)
-        except ValueError:
-            return default_value
-        if value < 2:
-            return 2
-        if value > 600:
-            return 600
-        return value
+            version = version_path.read_text(encoding="utf-8").splitlines()[0].strip()
+        except (OSError, IndexError):
+            return APP_VERSION
+        return version[:40] or APP_VERSION
 
-    def login_to_website(self) -> None:
-        website_url = self.website_url_var.get().strip().rstrip("/")
-        username = self.username_var.get().strip()
-        password = self.password_var.get().strip()
+    def create_scaled_logo(self, maximum_dimension):
+        if not self.logo_image:
+            return None
+        scale = max(1, math.ceil(max(self.logo_image.width(), self.logo_image.height()) / maximum_dimension))
+        scaled_logo = self.logo_image.subsample(scale, scale)
+        self.brand_images.append(scaled_logo)
+        return scaled_logo
 
-        if not website_url or not username or not password:
-            messagebox.showerror("Missing info", "Website URL, username, and password are required.")
+    def persist_settings(self):
+        try:
+            SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+            SETTINGS_PATH.write_text(json.dumps(self.settings, indent=2), encoding="utf-8")
+        except OSError:
+            self.last_update.set("Could not save local preferences on this device.")
+
+    def show_startup_splash(self):
+        self.splash = self.create_splash_window()
+        self.splash.after(3000, self.finish_startup)
+
+    def create_splash_window(self, preview=False):
+        splash = Toplevel(self.root)
+        splash.overrideredirect(True)
+        splash.configure(bg="#050608")
+        splash.attributes("-topmost", True)
+        width, height = 620, 660
+        x = (splash.winfo_screenwidth() - width) // 2
+        y = (splash.winfo_screenheight() - height) // 2
+        splash.geometry(f"{width}x{height}+{x}+{y}")
+
+        canvas = Canvas(splash, width=width, height=height, bg="#050608", highlightthickness=0)
+        canvas.pack(fill=BOTH, expand=True)
+        if logo := self.create_scaled_logo(500):
+            canvas.create_image(310, 280, image=logo)
+        else:
+            self.draw_splash_emblem(canvas)
+        canvas.create_text(310, 577, text=random.choice(SPLASH_MESSAGES), fill="#d9e1ea", font=("Segoe UI", 12))
+        canvas.create_line(200, 607, 420, 607, fill="#30291c", width=4)
+        canvas.create_line(200, 607, 365, 607, fill="#e0a83d", width=4)
+        canvas.create_text(310, 630, text="LOADING LIVE MARKET WORKSPACE", fill="#68737f", font=("Segoe UI", 7, "bold"))
+        if preview:
+            Button(
+                splash,
+                text="Close preview",
+                command=splash.destroy,
+                fg="#dce6f0",
+                bg="#1b2430",
+                activeforeground="#ffffff",
+                activebackground="#2a394c",
+                relief="flat",
+                borderwidth=0,
+                cursor="hand2",
+                font=("Segoe UI", 8, "bold"),
+                padx=12,
+                pady=6,
+            ).place(x=478, y=616)
+        return splash
+
+    def preview_startup_logo(self):
+        preview = self.create_splash_window(preview=True)
+        preview.lift()
+        preview.focus_force()
+
+    @staticmethod
+    def draw_splash_emblem(canvas):
+        """Draw a branded gold coin emblem inspired by the supplied VaultSignalsAI reference."""
+        centre_x, centre_y = 310, 275
+        canvas.create_oval(54, 19, 566, 531, fill="#06080a", outline="#2b1d09", width=2)
+        canvas.create_oval(60, 25, 560, 525, outline="#8b5b16", width=8)
+        canvas.create_oval(66, 31, 554, 519, outline="#f0bd4f", width=3)
+        canvas.create_arc(67, 32, 553, 518, start=74, extent=108, style="arc", outline="#fff0a1", width=4)
+        canvas.create_arc(67, 32, 553, 518, start=252, extent=68, style="arc", outline="#5d3a0d", width=3)
+        canvas.create_oval(84, 49, 536, 501, outline="#182027", width=2)
+
+        circuit_paths = [
+            (122, 178, 184, 178, 204, 199, 248, 199),
+            (116, 239, 171, 239, 192, 218, 236, 218),
+            (118, 316, 177, 316, 200, 293, 240, 293),
+            (498, 172, 435, 172, 414, 193, 369, 193),
+            (505, 247, 449, 247, 428, 226, 383, 226),
+            (500, 327, 445, 327, 423, 305, 380, 305),
+        ]
+        for path in circuit_paths:
+            canvas.create_line(path, fill="#172027", width=2)
+            for node_x, node_y in ((path[0], path[1]), (path[-2], path[-1])):
+                canvas.create_oval(node_x - 5, node_y - 5, node_x + 5, node_y + 5, outline="#243038", width=2)
+        for x, y in ((210, 158), (246, 138), (377, 139), (414, 163), (172, 355), (449, 360)):
+            canvas.create_oval(x - 5, y - 5, x + 5, y + 5, fill="#172027", outline="#273139")
+
+        canvas.create_polygon(145, 165, 284, 165, 310, 225, 336, 165, 475, 165, 310, 450, fill="#9b6118", outline="#ffdd79", width=2)
+        canvas.create_polygon(154, 174, 268, 174, 244, 205, 202, 205, 273, 343, 306, 414, 225, 310, 177, 235, fill="#d3952d", outline="#f8ce69", width=1)
+        canvas.create_polygon(273, 174, 300, 174, 326, 234, 307, 282, 273, 215, 246, 205, fill="#fff0a0", outline="#ffdc72", width=1)
+        canvas.create_polygon(345, 205, 418, 205, 465, 174, 393, 309, 315, 441, 338, 370, 420, 230, fill="#d49329", outline="#f9cd62", width=1)
+        canvas.create_polygon(314, 233, 344, 174, 456, 174, 425, 212, 348, 361, 315, 414, 290, 378, fill="#f4be4c", outline="#fff0a0", width=1)
+        canvas.create_polygon(258, 289, 285, 345, 310, 411, 337, 364, 309, 316, 286, 273, fill="#70430f", outline="#f2be4a", width=1)
+        canvas.create_line(310, 225, 310, 413, fill="#fff1a0", width=2)
+
+        bars = ((385, 139, 401, 207), (414, 112, 430, 207), (443, 85, 459, 207))
+        for index, (left, top, right, bottom) in enumerate(bars):
+            fill = ("#d29129", "#edb849", "#ffe18a")[index]
+            canvas.create_rectangle(left, top, right, bottom, fill=fill, outline="#fff0a0", width=1)
+
+        canvas.create_text(centre_x, 449, text="V A U L T S I G N A L S  A I", fill="#e9bd61", font=("Segoe UI", 13, "bold"))
+        canvas.create_text(centre_x, 476, text="MARKET INTELLIGENCE", fill="#79643d", font=("Segoe UI", 7, "bold"))
+
+    def finish_startup(self):
+        if getattr(self, "splash", None):
+            self.splash.destroy()
+            self.splash = None
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+        if self.start_fullscreen_enabled.get() and not self.is_fullscreen:
+            self.root.after(50, self.toggle_fullscreen)
+        if not self.market_thread_started:
+            self.market_thread_started = True
+            self.market_thread = threading.Thread(target=self.market_data_loop, daemon=True)
+            self.market_thread.start()
+        self.start_market_directory_load()
+        if not self.market_evaluation_started:
+            self.market_evaluation_started = True
+            self.market_evaluation_thread = threading.Thread(target=self.market_evaluation_loop, daemon=True)
+            self.market_evaluation_thread.start()
+        if not self.social_sentiment_thread_started:
+            self.social_sentiment_thread_started = True
+            self.social_sentiment_thread = threading.Thread(target=self.social_sentiment_loop, daemon=True)
+            self.social_sentiment_thread.start()
+
+    def show_page(self, title, subtitle):
+        if self.page_overlay:
+            self.page_overlay.destroy()
+        self.page_overlay = Frame(self.workspace, bg=BACKGROUND)
+        self.page_overlay.place(x=0, y=0, relwidth=1, relheight=1)
+        header = Frame(self.page_overlay, bg="#090c10", height=74, highlightbackground=BORDER, highlightthickness=1)
+        header.pack(fill=X)
+        header.pack_propagate(False)
+        self.create_button(header, "ÔÇ╣  Crypto markets", self.show_crypto_markets).pack(side=LEFT, padx=(32, 18), pady=17)
+        header_text = Frame(header, bg="#090c10")
+        header_text.pack(side=LEFT, pady=12)
+        Label(header_text, text=title, fg=TEXT, bg="#090c10", font=("Segoe UI", 15, "bold")).pack(anchor="w")
+        Label(header_text, text=subtitle, fg=MUTED, bg="#090c10", font=("Segoe UI", 8)).pack(anchor="w")
+        self.nav.lift()
+        self.nav_toggle.lift()
+        return self.page_overlay
+
+    def show_main_workspace(self):
+        if self.page_overlay:
+            self.page_overlay.destroy()
+            self.page_overlay = None
+        self.nav.lift()
+        self.nav_toggle.lift()
+        self.draw_chart()
+
+    @staticmethod
+    def fallback_markets():
+        symbols = [
+            "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", "BNBUSDT", "DOGEUSDT", "AVAXUSDT",
+            "LINKUSDT", "DOTUSDT", "ATOMUSDT", "LTCUSDT", "TRXUSDT", "UNIUSDT", "AAVEUSDT", "NEARUSDT",
+            "BTCUSDC", "ETHUSDC", "SOLUSDC", "XRPUSDC", "ADAUSDC", "BTCEUR", "ETHEUR", "SOLEUR", "XRPEUR",
+        ]
+        quote_assets = ("USDT", "USDC", "EUR")
+        markets = []
+        for symbol in symbols:
+            quote = next(quote for quote in quote_assets if symbol.endswith(quote))
+            markets.append({"symbol": symbol, "base": symbol[:-len(quote)], "quote": quote})
+        return markets
+
+    def start_market_directory_load(self):
+        if self.market_directory_loading or self.market_directory_loaded:
             return
+        self.market_directory_loading = True
+        threading.Thread(target=self.fetch_market_directory, daemon=True).start()
 
-        login_attempts = (
-            ("api/client-login", {"username": username, "password": password}),
-            ("api/login", {"email": username, "password": password, "rememberMe": True}),
-        )
+    def fetch_market_directory(self):
+        try:
+            response = self.fetch_json("https://api.binance.com/api/v3/exchangeInfo")
+            markets = [
+                {
+                    "symbol": item["symbol"],
+                    "base": item["baseAsset"],
+                    "quote": item["quoteAsset"],
+                }
+                for item in response.get("symbols", [])
+                if item.get("status") == "TRADING"
+                and item.get("isSpotTradingAllowed", True)
+                and item.get("quoteAsset") in {"USDT", "USDC", "EUR"}
+            ]
+            if not markets:
+                raise ValueError("No supported spot markets were returned.")
+            self.data_queue.put(("markets", "", markets))
+        except Exception as exc:
+            self.data_queue.put(("market_directory_error", "", str(exc)))
 
-        login_error: Exception | None = None
-        self.logged_in = False
-        self.website_cookie_jar.clear()
-
-        for endpoint_path, payload in login_attempts:
-            endpoint = urljoin(f"{website_url}/", endpoint_path)
+    def market_evaluation_loop(self):
+        while self.running:
             try:
-                response = self.post_json(endpoint, payload, use_session=True)
-                accepted = bool(response.get("ok", response.get("allowed", True)))
-                if not accepted:
-                    reason = str(response.get("message") or "Login rejected by website.")
-                    raise ValueError(reason)
+                ticker_rows = self.fetch_json("https://api.binance.com/api/v3/ticker/24hr")
+                metrics = {
+                    row["symbol"]: {
+                        "price": float(row.get("lastPrice", 0.0)),
+                        "change": float(row.get("priceChangePercent", 0.0)),
+                        "quote_volume": float(row.get("quoteVolume", 0.0)),
+                    }
+                    for row in ticker_rows
+                    if isinstance(row, dict) and row.get("symbol")
+                }
+                self.data_queue.put(("market_metrics", "", metrics))
+            except Exception as exc:
+                self.data_queue.put(("market_metrics_error", "", str(exc)))
+            time.sleep(MARKET_EVALUATION_SECONDS)
 
-                self.logged_in = True
-                self.preview_mode_login = False
-                self.account_status_var.set("Connected to website account.")
-                self.status_var.set("Login complete. Auto-sync can now run.")
-                break
-            except Exception as error:
-                login_error = error
-
-        if not self.logged_in:
-            use_preview = messagebox.askyesno(
-                "Website Login Unavailable",
-                (
-                    "Could not verify login with the website endpoint.\n\n"
-                    f"Reason: {login_error}\n\n"
-                    "Use preview mode login so you can test the app design now?"
-                ),
-            )
-            if use_preview:
-                self.logged_in = True
-                self.preview_mode_login = True
-                self.account_status_var.set("Preview mode login active.")
-                self.status_var.set("Preview mode enabled. Replace with website API later.")
-            else:
-                self.logged_in = False
-                self.preview_mode_login = False
-                self.account_status_var.set("Login failed.")
-                self.status_var.set("Login failed.")
-                return
-
-        self.config = self.collect_config()
-        save_config(self.config)
-
-    def logout_client(self) -> None:
-        if self.sync_running:
-            self.stop_auto_sync()
-        self.logged_in = False
-        self.preview_mode_login = False
-        self.website_cookie_jar.clear()
-        self.password_var.set("")
-        self.account_status_var.set("Logged out.")
-        self.status_var.set("Account logged out.")
-
-    def start_auto_sync(self) -> None:
-        if not self.logged_in:
-            messagebox.showwarning("Login required", "Login to the client account first.")
+    def open_market_browser(self):
+        if self.market_browser and self.market_browser.winfo_exists():
+            self.market_browser.deiconify()
+            self.market_browser.lift()
+            self.market_search_entry.focus_set()
             return
 
-        self.sync_market = self.market_var.get().strip().upper()
-        if self.sync_market not in MARKETS:
-            self.sync_market = "NASDAQ"
+        self.market_search.set("")
+        self.market_filter.set("EVALUATED")
+        browser = self.market_browser = Toplevel(self.root)
+        browser.title("VaultSignalsAI ÔÇó Evaluated crypto markets")
+        browser.configure(bg=BACKGROUND)
+        browser.geometry("1020x680")
+        browser.minsize(820, 560)
+        browser.transient(self.root)
+        browser.protocol("WM_DELETE_WINDOW", self.close_market_browser)
 
-        self.sync_seconds = self.read_sync_seconds(default_value=self.config.sync_seconds)
-        self.sync_discord_webhook = self.discord_webhook_var.get().strip()
-        self.sync_windows_notifications = bool(self.windows_notify_var.get())
-        self.sync_in_app_notifications = bool(self.in_app_notify_var.get())
+        header = Frame(browser, bg="#090c10", height=72, highlightbackground=BORDER, highlightthickness=1)
+        header.pack(fill=X)
+        header.pack_propagate(False)
+        Label(header, text="Evaluated crypto markets", fg=TEXT, bg="#090c10", font=("Segoe UI", 15, "bold")).pack(anchor="w", padx=22, pady=(13, 0))
+        Label(header, text="Search live spot markets by quote currency, movement, volume, and favourites.", fg=MUTED, bg="#090c10", font=("Segoe UI", 8)).pack(anchor="w", padx=22)
 
-        self.config = self.collect_config()
-        save_config(self.config)
-
-        self.stop_event.clear()
-        self.sync_thread = threading.Thread(target=self.sync_worker, daemon=True)
-        self.sync_thread.start()
-        self.sync_running = True
-
-        self.set_sync_button_states(True)
-        self.status_var.set(
-            f"Auto-sync running every {self.sync_seconds}s for {self.sync_market}."
+        controls = Frame(browser, bg=BACKGROUND)
+        controls.pack(fill=X, padx=22, pady=(18, 10))
+        self.market_search_entry = Entry(
+            controls,
+            textvariable=self.market_search,
+            bg="#151a22",
+            fg=TEXT,
+            insertbackground=TEXT,
+            relief="flat",
+            font=("Segoe UI", 10),
+            highlightthickness=1,
+            highlightbackground="#2b3440",
+            highlightcolor=BLUE,
         )
+        self.market_search_entry.pack(fill=X, ipady=8)
+        self.market_search_entry.bind("<KeyRelease>", lambda _event: self.render_market_results())
 
-    def stop_auto_sync(self) -> None:
-        self.stop_event.set()
-        self.sync_running = False
-        self.set_sync_button_states(False)
-        self.status_var.set("Auto-sync stopped.")
+        filters = Frame(browser, bg=BACKGROUND)
+        filters.pack(fill=X, padx=22, pady=(0, 10))
+        for name in ("EVALUATED", "ALL", "USDT", "EUR", "USDC", "STARRED"):
+            button = self.create_button(filters, name.title() if name == "STARRED" else name, lambda value=name: self.set_market_filter(value))
+            button.pack(side=LEFT, padx=(0, 7))
 
-    def send_test_signal(self) -> None:
-        signal = self.build_signal_snapshot()
-        delivery = self.deliver_signal(signal)
-        self.enqueue_signal_event(signal, delivery)
+        body = Frame(browser, bg=BACKGROUND)
+        body.pack(fill=BOTH, expand=True, padx=22, pady=(0, 16))
+        body.grid_columnconfigure(0, weight=1)
+        body.grid_rowconfigure(0, weight=1)
 
-    def sync_worker(self) -> None:
-        while not self.stop_event.is_set():
-            if self.preview_mode_login:
-                signal = self.build_signal_snapshot()
-                delivery = self.deliver_signal(signal)
-                self.enqueue_signal_event(signal, delivery, source="preview")
+        list_frame = Frame(body, bg=PANEL, highlightbackground=BORDER, highlightthickness=1)
+        list_frame.grid(row=0, column=0, sticky="nsew")
+        self.market_list = Listbox(
+            list_frame,
+            bg=PANEL,
+            fg="#d8e2ed",
+            selectbackground="#254262",
+            selectforeground="#ffffff",
+            activestyle="none",
+            relief="flat",
+            borderwidth=0,
+            font=("Cascadia Mono", 10),
+            highlightthickness=0,
+            exportselection=False,
+        )
+        scrollbar = Scrollbar(list_frame, command=self.market_list.yview)
+        self.market_list.configure(yscrollcommand=scrollbar.set)
+        self.market_list.pack(side=LEFT, fill=BOTH, expand=True, padx=(10, 0), pady=10)
+        scrollbar.pack(side=RIGHT, fill=Y, padx=(0, 10), pady=10)
+        self.market_list.bind("<<ListboxSelect>>", self.preview_selected_market)
+        self.market_list.bind("<Double-Button-1>", lambda _event: self.open_selected_market())
+
+        details = Frame(body, bg=PANEL, width=270, highlightbackground=BORDER, highlightthickness=1)
+        details.grid(row=0, column=1, sticky="nsew", padx=(14, 0))
+        details.grid_propagate(False)
+        Label(details, text="MARKET SELECTION", fg=MUTED, bg=PANEL, font=("Segoe UI", 8, "bold")).pack(anchor="w", padx=18, pady=(20, 5))
+        self.market_preview = Label(details, text="Select a market", fg=TEXT, bg=PANEL, font=("Segoe UI", 14, "bold"), wraplength=195, justify=LEFT)
+        self.market_preview.pack(anchor="w", padx=18)
+        self.market_metric_preview = Label(details, text="", fg="#bdc8d4", bg=PANEL, wraplength=225, justify=LEFT, font=("Cascadia Mono", 8))
+        self.market_metric_preview.pack(anchor="w", padx=18, pady=(8, 0))
+        self.market_star_status = Label(details, text="", fg="#f5c95c", bg=PANEL, font=("Segoe UI", 9))
+        self.market_star_status.pack(anchor="w", padx=18, pady=(6, 20))
+        self.create_button(details, "Open market", self.open_selected_market, primary=True).pack(anchor="w", padx=18, pady=(0, 8))
+        self.star_market_button = self.create_button(details, "Star selected", self.toggle_selected_favorite)
+        self.star_market_button.pack(anchor="w", padx=18)
+        Label(
+            details,
+            text="Starred markets are saved on this device and always appear first. Turn on selected-market alerts in Account to target notifications to this list.",
+            fg=MUTED,
+            bg=PANEL,
+            wraplength=195,
+            justify=LEFT,
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", padx=18, pady=(24, 0))
+
+        footer = Frame(browser, bg="#090c10", height=38, highlightbackground=BORDER, highlightthickness=1)
+        footer.pack(fill=X)
+        footer.pack_propagate(False)
+        Label(footer, textvariable=self.market_browser_status, fg=MUTED, bg="#090c10", font=("Segoe UI", 8)).pack(anchor="w", padx=22, pady=11)
+
+        self.render_market_results(preselect=self.follow_symbol.get())
+        self.start_market_directory_load()
+        browser.lift()
+        browser.focus_force()
+        self.market_search_entry.focus_set()
+
+    def close_market_browser(self):
+        if self.market_browser:
+            self.market_browser.destroy()
+            self.market_browser = None
+
+    def set_market_filter(self, market_filter):
+        self.market_filter.set(market_filter)
+        self.render_market_results()
+
+    def render_market_results(self, preselect=None):
+        if not self.market_browser or not self.market_browser.winfo_exists():
+            return
+        search = self.market_search.get().strip().upper()
+        selected_filter = self.market_filter.get()
+        results = []
+        for market in self.market_directory:
+            if selected_filter == "STARRED" and market["symbol"] not in self.favorite_symbols:
+                continue
+            if selected_filter == "EVALUATED" and market["symbol"] not in self.market_metrics:
+                continue
+            if selected_filter not in ("ALL", "STARRED", "EVALUATED") and market["quote"] != selected_filter:
+                continue
+            searchable = f"{market['symbol']} {market['base']} {market['quote']}"
+            if search and search not in searchable:
+                continue
+            results.append(market)
+
+        if selected_filter == "EVALUATED":
+            results.sort(
+                key=lambda item: (
+                    item["symbol"] not in self.favorite_symbols,
+                    -self.market_score(item["symbol"]),
+                    item["base"],
+                )
+            )
+        else:
+            results.sort(key=lambda item: (item["symbol"] not in self.favorite_symbols, item["base"], item["quote"]))
+        self.visible_market_symbols = [item["symbol"] for item in results]
+        self.market_list.delete(0, "end")
+        selected_index = None
+        for index, market in enumerate(results):
+            star = "Ôÿà" if market["symbol"] in self.favorite_symbols else " "
+            metrics = self.market_metrics.get(market["symbol"])
+            if metrics:
+                movement = metrics["change"]
+                price = self.format_price(metrics["price"])
+                volume = self.format_compact_number(metrics["quote_volume"])
+                self.market_list.insert(
+                    "end",
+                    f"{star}  {market['base']:<10} / {market['quote']:<4}  {price:>14}  {movement:+7.2f}%  V {volume:>8}",
+                )
             else:
-                website_signals = self.fetch_website_signals()
-                for signal in website_signals:
-                    delivery = self.deliver_signal(signal)
-                    self.enqueue_signal_event(signal, delivery, source="website")
+                self.market_list.insert("end", f"{star}  {market['base']:<10} / {market['quote']:<4}  waiting for evaluation")
+            if market["symbol"] == preselect:
+                selected_index = index
 
-            if self.stop_event.wait(self.sync_seconds):
-                break
+        source = "live exchange directory" if self.market_directory_loaded else "fallback list while live directory loads"
+        self.market_browser_status.set(f"{len(results)} markets shown ÔÇó {source} ÔÇó Ôÿà favourites are pinned first")
+        if selected_index is not None:
+            self.market_list.selection_set(selected_index)
+            self.market_list.see(selected_index)
+            self.preview_selected_market()
+        else:
+            self.market_preview.configure(text="Select a market")
+            self.market_metric_preview.configure(text="")
+            self.market_star_status.configure(text="")
 
-    def enqueue_signal_event(self, signal: dict, delivery: str, source: str = "app") -> None:
-        self.event_queue.put(
+    def selected_browser_symbol(self):
+        if not hasattr(self, "market_list"):
+            return ""
+        selected = self.market_list.curselection()
+        if not selected:
+            return ""
+        index = selected[0]
+        return self.visible_market_symbols[index] if index < len(self.visible_market_symbols) else ""
+
+    def preview_selected_market(self, _event=None):
+        symbol = self.selected_browser_symbol()
+        if not symbol:
+            return
+        self.market_preview.configure(text=self.display_symbol(symbol))
+        metrics = self.market_metrics.get(symbol)
+        quote = next((market["quote"] for market in self.market_directory if market["symbol"] == symbol), "")
+        if metrics:
+            self.market_metric_preview.configure(
+                text=(
+                    f"Price      {self.format_price(metrics['price'])}\n"
+                    f"24H move   {metrics['change']:+.2f}%\n"
+                    f"Volume     {self.format_compact_number(metrics['quote_volume'])} {quote}"
+                )
+            )
+        else:
+            self.market_metric_preview.configure(text="Waiting for a live evaluation snapshot.")
+        starred = symbol in self.favorite_symbols
+        self.market_star_status.configure(text="Ôÿà Starred and pinned" if starred else "Not starred")
+        self.star_market_button.configure(text="Remove star" if starred else "Star selected")
+
+    def market_score(self, symbol):
+        metrics = self.market_metrics.get(symbol)
+        if not metrics:
+            return 0.0
+        return abs(metrics["change"]) * (1 + min(metrics["quote_volume"] / ALERT_MIN_QUOTE_VOLUME, 10))
+
+    def toggle_selected_favorite(self):
+        symbol = self.selected_browser_symbol()
+        if not symbol:
+            self.market_browser_status.set("Select a market before changing its star status.")
+            return
+        if symbol in self.favorite_symbols:
+            self.favorite_symbols.remove(symbol)
+        else:
+            self.favorite_symbols.add(symbol)
+        self.settings["favorite_symbols"] = sorted(self.favorite_symbols)
+        self.update_favorite_market_summary()
+        self.persist_settings()
+        self.update_quick_market_values()
+        self.render_market_results(preselect=symbol)
+
+    def open_selected_market(self):
+        symbol = self.selected_browser_symbol()
+        if not symbol:
+            self.market_browser_status.set("Select a market to open it.")
+            return
+        self.follow_symbol.set(symbol)
+        self.profile_market.set(symbol)
+        self.open_followed_asset()
+        self.close_market_browser()
+
+    def update_quick_market_values(self):
+        quick_symbols = list(sorted(self.favorite_symbols))
+        for symbol in [self.active_symbol, self.follow_symbol.get(), *SYMBOL_OPTIONS]:
+            if symbol not in quick_symbols:
+                quick_symbols.append(symbol)
+        self.symbol_combo.configure(values=quick_symbols)
+
+    def update_favorite_market_summary(self):
+        if not self.favorite_symbols:
+            if self.restrict_alerts_to_favorites.get():
+                self.favorite_market_summary.set("Selected-market alerts are on, but no markets are selected. Choose markets to receive alerts.")
+            else:
+                self.favorite_market_summary.set("No markets selected. Alerts currently scan all eligible markets.")
+            return
+        displayed_symbols = [self.display_symbol(symbol) for symbol in sorted(self.favorite_symbols)]
+        summary = ", ".join(displayed_symbols)
+        scope = "Only these markets can raise alerts." if self.restrict_alerts_to_favorites.get() else "Alerts still scan all eligible markets."
+        self.favorite_market_summary.set(f"Selected markets: {summary[:180]}\n{scope}")
+
+    def on_alert_scope_changed(self, *_args):
+        self.update_favorite_market_summary()
+
+    @staticmethod
+    def create_page_card(parent, title, subtitle):
+        card = Frame(parent, bg=PANEL, highlightbackground=BORDER, highlightthickness=1)
+        Label(card, text=title, fg=TEXT, bg=PANEL, font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=22, pady=(18, 2))
+        Label(card, text=subtitle, fg=MUTED, bg=PANEL, font=("Segoe UI", 8)).pack(anchor="w", padx=22, pady=(0, 16))
+        return card
+
+    def add_form_field(self, parent, label, variable):
+        row = Frame(parent, bg=PANEL)
+        row.pack(fill=X, pady=(0, 12))
+        Label(row, text=label.upper(), fg=MUTED, bg=PANEL, font=("Segoe UI", 8, "bold")).pack(anchor="w", pady=(0, 5))
+        entry = Entry(
+            row,
+            textvariable=variable,
+            bg="#151a22",
+            fg=TEXT,
+            insertbackground=TEXT,
+            relief="flat",
+            font=("Segoe UI", 10),
+            highlightthickness=1,
+            highlightbackground="#2b3440",
+            highlightcolor=BLUE,
+        )
+        entry.pack(fill=X, ipady=8)
+
+    def add_form_combo(self, parent, label, variable, values):
+        row = Frame(parent, bg=PANEL)
+        row.pack(fill=X, pady=(0, 12))
+        Label(row, text=label.upper(), fg=MUTED, bg=PANEL, font=("Segoe UI", 8, "bold")).pack(anchor="w", pady=(0, 5))
+        combo = ttk.Combobox(row, textvariable=variable, values=values, state="readonly", style="Vault.TCombobox")
+        combo.pack(fill=X, ipady=4)
+
+    def add_toggle_row(self, parent, label, variable):
+        row = Frame(parent, bg=PANEL)
+        row.pack(fill=X, padx=22, pady=(0, 10))
+        ttk.Checkbutton(row, text=label, variable=variable, takefocus=True).pack(anchor="w")
+
+    def save_account_profile(self):
+        name = self.profile_name.get().strip() or self.local_windows_user
+        market = self.profile_market.get()
+        discord_contact = self.discord_contact.get().strip()
+        discord_tier = self.discord_tier.get().strip() or "Unverified"
+        if len(discord_contact) > 80:
+            self.account_notice.set("Keep the Discord profile reference to 80 characters or fewer.")
+            return
+        if len(discord_tier) > 40:
+            self.account_notice.set("Keep the locally recorded Discord tier to 40 characters or fewer.")
+            return
+        if self.discord_market_updates_opt_in.get() and not discord_contact:
+            self.account_notice.set("Add a Discord username or user ID before opting in to future Discord updates.")
+            return
+        self.user_name = name
+        self.welcome_text.set(f"Welcome, {name}")
+        self.settings.update(
             {
-                "kind": "signal",
-                "signal": signal,
-                "delivery": delivery,
-                "show_in_app": self.sync_in_app_notifications,
-                "source": source,
+                "display_name": name,
+                "default_symbol": market,
+                "discord_contact": discord_contact,
+                "discord_tier": discord_tier,
+                "discord_market_updates_opt_in": self.discord_market_updates_opt_in.get(),
+                "restrict_alerts_to_favorites": self.restrict_alerts_to_favorites.get(),
             }
         )
+        self.persist_settings()
+        self.account_notice.set("Account and notification preferences saved locally. Discord delivery is not connected in this beta.")
+        self.last_update.set("Local account and market preferences saved.")
 
-    def fetch_website_signals(self) -> list[dict]:
-        website_url = self.website_url_var.get().strip().rstrip("/")
-        if not website_url:
-            return []
+    def reset_account_profile(self):
+        self.profile_name.set(self.local_windows_user)
+        self.profile_market.set(DEFAULT_SYMBOL)
+        self.discord_contact.set("")
+        self.discord_tier.set("Unverified")
+        self.discord_market_updates_opt_in.set(False)
+        self.restrict_alerts_to_favorites.set(False)
+        self.account_notice.set("Account form reset. Your selected markets are unchanged until you edit them in Browse.")
 
-        candidate_endpoints = (
-            "api/ai/stock-signals?limit=6",
-            "api/member/signals",
-            "api/pro/signals",
-        )
-        normalized_signals: list[dict] = []
-
-        for endpoint_path in candidate_endpoints:
-            endpoint = urljoin(f"{website_url}/", endpoint_path)
-            payload = None
-            try:
-                payload = self.get_json(endpoint, use_session=True)
-            except Exception:
-                payload = None
-
-            if payload is None:
-                continue
-
-            normalized_signals = self.parse_signal_payload(payload)
-            if normalized_signals:
-                break
-
-        if not normalized_signals:
-            return []
-
-        fresh_signals: list[dict] = []
-        for signal in normalized_signals:
-            key = signal.get("key")
-            if not key or key in self.known_signal_keys:
-                continue
-            self.known_signal_keys.add(key)
-            self.known_signal_order.append(key)
-            fresh_signals.append(signal)
-
-        if len(self.known_signal_order) > 2000:
-            stale_keys = self.known_signal_order[:-1000]
-            self.known_signal_order = self.known_signal_order[-1000:]
-            for stale_key in stale_keys:
-                self.known_signal_keys.discard(stale_key)
-
-        return fresh_signals
-
-    def parse_signal_payload(self, payload: object) -> list[dict]:
-        rows: list[dict] = []
-
-        if isinstance(payload, list):
-            rows = [row for row in payload if isinstance(row, dict)]
-        elif isinstance(payload, dict):
-            if payload.get("ok") is False and not payload.get("signals"):
-                return []
-            direct_rows = payload.get("signals")
-            if isinstance(direct_rows, list):
-                rows = [row for row in direct_rows if isinstance(row, dict)]
-            nested_result = payload.get("result")
-            if not rows and isinstance(nested_result, dict):
-                nested_rows = nested_result.get("signals")
-                if isinstance(nested_rows, list):
-                    rows = [row for row in nested_rows if isinstance(row, dict)]
-
-        normalized: list[dict] = []
-        for row in rows:
-            parsed = self.normalize_website_signal(row)
-            if parsed is not None:
-                normalized.append(parsed)
-        return normalized
-
-    def normalize_website_signal(self, row: dict) -> dict | None:
-        raw_symbol = row.get("assetSymbol") or row.get("symbol") or row.get("asset_symbol") or ""
-        symbol = str(raw_symbol).strip().upper()
-        if not symbol:
-            return None
-
-        raw_action = row.get("aiAction") or row.get("direction") or row.get("signal") or ""
-        action = str(raw_action).strip().upper()
-        if action in {"LONG", "BUY"}:
-            signal_side = "BUY"
-        elif action in {"SHORT", "SELL"}:
-            signal_side = "SELL"
-        else:
-            signal_side = "INFO"
-
-        raw_market = row.get("market") or row.get("sessionLabel") or row.get("session_label") or self.sync_market
-        market = str(raw_market).strip().upper() or self.sync_market
-
-        raw_price = row.get("entryPrice")
-        if raw_price is None:
-            raw_price = row.get("price")
-        if raw_price is None:
-            raw_price = row.get("entry_price")
-
-        currency = str(
-            row.get("displayCurrencyCode")
-            or row.get("baseCurrencyCode")
-            or row.get("currencyCode")
-            or "USD"
-        ).strip().upper()
-
-        price_text = "N/A"
+    def save_settings(self):
         try:
-            numeric_price = float(raw_price)
-            if currency == "USD":
-                price_text = f"${numeric_price:,.2f}"
-            else:
-                price_text = f"{currency} {numeric_price:,.2f}"
-        except (TypeError, ValueError):
-            if raw_price is not None:
-                price_text = str(raw_price)
-
-        time_value = str(
-            row.get("signalTimeUtc")
-            or row.get("time")
-            or row.get("signal_starts_at_utc")
-            or ""
-        ).strip()
-        formatted_time = self.format_signal_time(time_value)
-
-        unique_key = str(
-            row.get("id")
-            or f"{symbol}:{signal_side}:{row.get('signalDay') or row.get('signal_day') or ''}:{formatted_time}:{price_text}"
-        )
-
-        return {
-            "key": unique_key,
-            "time": formatted_time,
-            "market": market,
-            "symbol": symbol,
-            "signal": signal_side,
-            "price": price_text,
-        }
-
-    def format_signal_time(self, raw_value: str) -> str:
-        candidate = raw_value.strip()
-        if not candidate:
-            return datetime.now().strftime("%H:%M:%S")
-
-        if len(candidate) >= 8 and candidate[2] == ":" and candidate[5] == ":":
-            return candidate[:8]
-
-        if len(candidate) >= 5 and candidate[2] == ":":
-            return f"{candidate[:5]}:00"
-
-        if "T" in candidate:
-            try:
-                parsed = datetime.fromisoformat(candidate.replace("Z", "+00:00"))
-                return parsed.strftime("%H:%M:%S")
-            except ValueError:
-                pass
-
-        return datetime.now().strftime("%H:%M:%S")
-
-    def build_signal_snapshot(self) -> dict:
-        symbols = SYMBOLS_BY_MARKET.get(self.sync_market, SYMBOLS_BY_MARKET["NASDAQ"])
-        symbol = RNG.choice(symbols)
-        side = RNG.choice(["BUY", "SELL"])
-
-        base_price = RNG.uniform(18, 750)
-        variance = RNG.uniform(-3.2, 3.2)
-        price = max(1.0, base_price + variance)
-
-        return {
-            "time": datetime.now().strftime("%H:%M:%S"),
-            "market": self.sync_market,
-            "symbol": symbol,
-            "signal": side,
-            "price": f"${price:,.2f}",
-        }
-
-    def deliver_signal(self, signal: dict) -> str:
-        message = (
-            f"{APP_NAME} {signal['signal']} {signal['symbol']} @ {signal['price']} "
-            f"[{signal['market']}]"
-        )
-
-        delivery = "App"
-
-        if self.sync_discord_webhook:
-            ok, detail = self.send_discord_message(self.sync_discord_webhook, message)
-            if ok:
-                delivery = "Discord + App"
-            else:
-                delivery = f"Discord error: {detail}"
-
-        if self.sync_windows_notifications:
-            self.send_windows_notification("New Trading Signal", message)
-
-        return delivery
-
-    def send_discord_message(self, webhook_url: str, message: str) -> tuple[bool, str]:
-        body = json.dumps({"content": message}).encode("utf-8")
-        request_obj = Request(
-            webhook_url,
-            data=body,
-            headers={"Content-Type": "application/json", "User-Agent": APP_NAME},
-            method="POST",
-        )
-
-        try:
-            with build_opener().open(request_obj, timeout=10):
-                return True, "sent"
-        except HTTPError as error:
-            return False, f"HTTP {error.code}"
-        except URLError as error:
-            return False, str(error.reason)
+            refresh_seconds = int(self.refresh_interval_choice.get())
         except ValueError:
-            return False, "invalid webhook url"
-
-    def send_windows_notification(self, title: str, message: str) -> None:
-        if plyer_notification is not None:
-            try:
-                plyer_notification.notify(title=title, message=message, timeout=4)
-                return
-            except Exception:
-                return
-
-    def post_json(self, url: str, payload: dict, use_session: bool = False) -> dict:
-        body = json.dumps(payload).encode("utf-8")
-        request_obj = Request(
-            url,
-            data=body,
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
-            method="POST",
+            refresh_seconds = REFRESH_INTERVAL_SECONDS
+        if refresh_seconds not in (1, 2, 5):
+            refresh_seconds = REFRESH_INTERVAL_SECONDS
+        try:
+            alert_threshold = int(self.alert_threshold_choice.get())
+        except ValueError:
+            alert_threshold = 8
+        if alert_threshold not in (5, 8, 10):
+            alert_threshold = 8
+        social_sentiment_url = self.social_sentiment_url.get().strip()
+        if social_sentiment_url and not social_sentiment_url.startswith("https://"):
+            self.settings_notice.set("The social sentiment connector must use a secure HTTPS URL.")
+            return
+        previous_social_sentiment_url = self.settings["social_sentiment_url"]
+        self.refresh_interval_seconds = refresh_seconds
+        self.alert_threshold_percent = alert_threshold
+        self.settings.update(
+            {
+                "display_name": self.user_name,
+                "default_symbol": self.profile_market.get(),
+                "refresh_seconds": refresh_seconds,
+                "show_splash": self.splash_enabled.get(),
+                "start_fullscreen": self.start_fullscreen_enabled.get(),
+                "alerts_enabled": self.alerts_enabled.get(),
+                "alert_threshold_percent": alert_threshold,
+                "show_scenario_overlay": self.scenario_overlay_enabled.get(),
+                "social_sentiment_url": social_sentiment_url,
+            }
         )
+        self.persist_settings()
+        if social_sentiment_url != previous_social_sentiment_url:
+            self.social_sentiment_score = None
+            self.social_sentiment_source = "Waiting for the configured public sentiment source"
+            self.social_sentiment_updated_at = ""
+            self.social_sentiment_text.set("WAITING")
+            self.request_social_sentiment_refresh()
+        self.recalculate_scenario()
+        self.settings_notice.set("Settings saved. Startup options apply next time you open the app.")
+        self.last_update.set("Settings saved. Live refresh update is active.")
 
-        raw = self.open_request(request_obj, use_session=use_session)
+    def reset_settings(self):
+        self.refresh_interval_choice.set(str(REFRESH_INTERVAL_SECONDS))
+        self.profile_market.set(DEFAULT_SYMBOL)
+        self.splash_enabled.set(True)
+        self.start_fullscreen_enabled.set(False)
+        self.alerts_enabled.set(True)
+        self.alert_threshold_choice.set("8")
+        self.scenario_overlay_enabled.set(True)
+        self.social_sentiment_url.set("")
+        self.settings_notice.set("Settings reset in the form. Select Save settings to keep them.")
 
-        parsed = json.loads(raw) if raw else {}
-        if isinstance(parsed, dict):
-            return parsed
-        raise ValueError("Invalid JSON response from website.")
+    @staticmethod
+    def get_local_user_name():
+        name = getuser().strip().replace(".", " ").replace("_", " ").replace("-", " ")
+        return name.title() if name else "there"
 
-    def get_json(self, url: str, use_session: bool = False) -> object:
-        request_obj = Request(
-            url,
-            headers={"Accept": "application/json", "User-Agent": APP_NAME},
-            method="GET",
+    @staticmethod
+    def display_symbol(symbol):
+        if symbol.endswith("USDT"):
+            return f"{symbol[:-4]} / USDT"
+        return symbol
+
+    def add_divider(self, parent):
+        Frame(parent, bg=BORDER, height=1).pack(fill=X, padx=16, pady=(0, 2))
+
+    def add_stat(self, parent, title, value, colour):
+        row = Frame(parent, bg=PANEL)
+        row.pack(fill=X, padx=16, pady=7)
+        Label(row, text=title, fg=MUTED, bg=PANEL, font=("Segoe UI", 7, "bold")).pack(anchor="w")
+        Label(row, textvariable=value, fg=colour, bg=PANEL, font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(1, 0))
+
+    def toggle_navigation(self):
+        self.nav_expanded = not self.nav_expanded
+        if self.nav_expanded:
+            self.nav.place_configure(x=0)
+            self.nav_toggle.place_configure(x=211)
+            self.nav_toggle.configure(text="ÔÇ╣")
+            self.nav.lift()
+            self.nav_toggle.lift()
+        else:
+            self.nav.place_configure(x=-228)
+            self.nav_toggle.place_configure(x=14)
+            self.nav_toggle.configure(text="ÔÇ║")
+            self.nav_toggle.lift()
+
+    def show_crypto_markets(self):
+        self.show_main_workspace()
+        self.last_update.set("Opening evaluated crypto markets.")
+        self.open_market_browser()
+
+    def show_account(self):
+        page = self.show_page("Account", "Manage local profile, market, and future notification preferences.")
+        content = Frame(page, bg=BACKGROUND)
+        content.pack(fill=BOTH, expand=True, padx=42, pady=(4, 30))
+
+        identity = self.create_page_card(content, "Local profile", "Preferences stay on this device. This beta does not create an online account.")
+        identity.pack(fill=X, pady=(0, 18))
+        Label(identity, text=f"Windows user: {self.local_windows_user}", fg="#afbdca", bg=PANEL, font=("Segoe UI", 10)).pack(anchor="w", padx=22, pady=(2, 14))
+
+        preferences = self.create_page_card(content, "Account and market preferences", "Choose a default market and target high-impact alerts to selected markets.")
+        preferences.pack(fill=X)
+        form = Frame(preferences, bg=PANEL)
+        form.pack(fill=X, padx=22, pady=(0, 14))
+        self.add_form_field(form, "Display name", self.profile_name)
+        self.add_form_combo(form, "Default market", self.profile_market, SYMBOL_OPTIONS)
+        self.add_form_field(form, "Discord username or user ID", self.discord_contact)
+        self.add_form_field(form, "Discord tier (local note)", self.discord_tier)
+        self.add_toggle_row(preferences, "Opt in to future Discord market updates", self.discord_market_updates_opt_in)
+        Label(
+            preferences,
+            text="The Discord reference and tier note are saved only on this device. This beta does not log in to Discord, verify a tier, upload your identity, or send Discord messages. Only a separate server-side Discord OAuth and bot service can verify tiers or choose notification delivery.",
+            fg=MUTED,
+            bg=PANEL,
+            wraplength=760,
+            justify=LEFT,
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", padx=22, pady=(0, 14))
+        Label(preferences, text="PREFERRED NOTIFICATION MARKETS", fg=MUTED, bg=PANEL, font=("Segoe UI", 8, "bold")).pack(anchor="w", padx=22, pady=(0, 5))
+        Label(preferences, textvariable=self.favorite_market_summary, fg="#bdc8d4", bg=PANEL, wraplength=760, justify=LEFT, font=("Segoe UI", 9)).pack(anchor="w", padx=22, pady=(0, 8))
+        self.add_toggle_row(preferences, "Alert only on my selected markets", self.restrict_alerts_to_favorites)
+        actions = Frame(preferences, bg=PANEL)
+        actions.pack(fill=X, padx=22, pady=(0, 8))
+        self.create_button(actions, "Choose notification markets", self.show_crypto_markets).pack(side=LEFT)
+        self.create_button(actions, "Save profile", self.save_account_profile, primary=True).pack(side=LEFT, padx=(8, 0))
+        self.create_button(actions, "Reset form", self.reset_account_profile).pack(side=LEFT, padx=(8, 0))
+        Label(preferences, textvariable=self.account_notice, fg=GREEN, bg=PANEL, font=("Segoe UI", 9)).pack(anchor="w", padx=22, pady=(0, 18))
+
+    def show_scenario_report(self):
+        page = self.show_page(
+            "Scenario report",
+            "Candle analysis with an optional public sentiment input. This is not a future-price forecast or trading instruction.",
         )
-        raw = self.open_request(request_obj, use_session=use_session)
-        return json.loads(raw) if raw else {}
+        content = Frame(page, bg=BACKGROUND)
+        content.pack(fill=BOTH, expand=True, padx=42, pady=(4, 30))
 
-    def open_request(self, request_obj: Request, use_session: bool = False) -> str:
-        if use_session:
-            with self.website_opener.open(request_obj, timeout=10) as response:
-                return response.read().decode("utf-8")
-        with build_opener().open(request_obj, timeout=10) as response:
-            return response.read().decode("utf-8")
+        current = self.create_page_card(
+            content,
+            "Current 12-hour observed-volatility scenario",
+            "The chart's dotted path is a modelled range from recent one-hour candles, not a price target.",
+        )
+        current.pack(fill=X, pady=(0, 18))
+        if self.scenario:
+            as_of = self.scenario["as_of"].strftime("%A, %d %B %Y %H:%M:%S")
+            source = self.social_sentiment_source
+            if self.social_sentiment_updated_at:
+                source = f"{source} ÔÇó updated {self.social_sentiment_updated_at}"
+            detail = (
+                f"Market                 {self.display_symbol(self.active_symbol)}\n"
+                f"Calculated             {as_of}\n"
+                f"Current reference      {self.format_price(self.scenario['reference_price'])}\n"
+                f"12H scenario midpoint  {self.format_price(self.scenario['midpoint'])}\n"
+                f"12H upper band         {self.format_price(self.scenario['upper'])}\n"
+                f"12H lower band         {self.format_price(self.scenario['lower'])}\n"
+                f"Candle volatility      {self.scenario['volatility'] * 100:.2f}% per hour\n"
+                f"Sentiment input        {self.social_sentiment_text.get()}\n"
+                f"Source                 {source}"
+            )
+        else:
+            detail = "Waiting for at least 24 completed one-hour candles before a scenario can be shown."
+        Label(
+            current,
+            text=detail,
+            fg="#c6d1dc",
+            bg=PANEL,
+            justify=LEFT,
+            font=("Cascadia Mono", 9),
+        ).pack(anchor="w", padx=22, pady=(0, 20))
 
-    def drain_event_queue(self) -> None:
-        while True:
-            try:
-                event = self.event_queue.get_nowait()
-            except queue.Empty:
-                break
-
-            if event.get("kind") == "signal":
-                signal = event["signal"]
-                delivery = str(event.get("delivery") or "App")
-                source = str(event.get("source") or "app")
-                if bool(event.get("show_in_app", True)):
-                    self.add_signal_to_table(signal, delivery)
-                self.add_signal_notification(signal, source)
-                self.status_var.set(
-                    f"Signal {signal['signal']} {signal['symbol']} sent via {delivery}."
-                )
-
-        self.root.after(220, self.drain_event_queue)
-
-    def add_signal_to_table(self, signal: dict, delivery: str) -> None:
-        item_id = self.signal_tree.insert(
-            "",
-            0,
-            values=(
-                signal["time"],
-                signal["market"],
-                signal["symbol"],
-                signal["signal"],
-                signal["price"],
-                delivery,
+        method = self.create_page_card(content, "Method and limits", "Use the range for research, not as a buying, selling, or profit decision.")
+        method.pack(fill=X)
+        Label(
+            method,
+            text=(
+                "The scenario measures recent candle returns, realised volatility, and relative volume. A configured public sentiment connector can make a small adjustment to the path. "
+                "It cannot know future market moves, prices, social-media events, liquidity changes, or whether a trade will be profitable."
             ),
+            fg=MUTED,
+            bg=PANEL,
+            wraplength=900,
+            justify=LEFT,
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", padx=22, pady=(0, 18))
+        self.create_button(method, "Open chart", self.show_main_workspace, primary=True).pack(anchor="w", padx=22, pady=(0, 20))
+
+    def show_learning_and_risk(self):
+        page = self.show_page(
+            "Learn & risk",
+            "Educational market-data explanations and release guardrails. This page does not provide legal or financial advice.",
         )
-        self.signal_tree.selection_set(item_id)
+        content = Frame(page, bg=BACKGROUND)
+        content.pack(fill=BOTH, expand=True, padx=42, pady=(4, 30))
 
-        children = self.signal_tree.get_children()
-        if len(children) > 250:
-            for stale_id in children[250:]:
-                self.signal_tree.delete(stale_id)
-
-    def add_signal_notification(self, signal: dict, source: str) -> None:
-        source_label = "WEB" if source == "website" else source.upper()
-        message = (
-            f"[{source_label}] {signal['time']} | {signal['signal']} {signal['symbol']} "
-            f"@ {signal['price']} [{signal['market']}]"
+        learning = self.create_page_card(
+            content,
+            "Learning-first market workspace",
+            "Use charts, public-market movement, and scenario ranges to understand how crypto markets can move.",
         )
-        self.notification_list.insert(0, message)
-        if self.notification_list.size() > 400:
-            self.notification_list.delete(400, "end")
+        learning.pack(fill=X, pady=(0, 18))
+        Label(
+            learning,
+            text=(
+                "The app displays observed market data, recent price change, volume, and an illustrative volatility range. "
+                "The direction label describes current inputs only; its strength value is not the chance of a future move."
+            ),
+            fg="#c6d1dc",
+            bg=PANEL,
+            wraplength=900,
+            justify=LEFT,
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", padx=22, pady=(0, 18))
 
-    def on_signal_mousewheel(self, event: tk.Event) -> str:
-        if getattr(event, "delta", 0) == 0:
+        risk = self.create_page_card(
+            content,
+            "Risk and product boundaries",
+            "Cryptoassets are high risk. Values can fall quickly and users can lose all of the money they invest.",
+        )
+        risk.pack(fill=X, pady=(0, 18))
+        Label(
+            risk,
+            text=(
+                "VaultSignalsAI must not promise returns, call a scenario a guaranteed outcome, or tell a user to buy, sell, or hold an asset. "
+                "Keep the product educational and general: show data sources, assumptions, timestamps, and uncertainty alongside every market view."
+            ),
+            fg=MUTED,
+            bg=PANEL,
+            wraplength=900,
+            justify=LEFT,
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", padx=22, pady=(0, 18))
+
+        release = self.create_page_card(
+            content,
+            "UK public-release check",
+            "This software is not FCA approved or FCA authorised simply because it includes this page or a disclaimer.",
+        )
+        release.pack(fill=X)
+        Label(
+            release,
+            text=(
+                "Before making the download or related promotions available in the UK, obtain qualified, current legal and compliance advice. "
+                "Confirm whether the product, subscription, audience, marketing, and cryptoasset financial promotions are regulated; follow the applicable approval, authorisation, risk-warning, record-keeping, privacy, and consumer-protection requirements. "
+                "Only state an FCA status after it has been independently verified."
+            ),
+            fg=MUTED,
+            bg=PANEL,
+            wraplength=900,
+            justify=LEFT,
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", padx=22, pady=(0, 18))
+        self.create_button(release, "Open chart", self.show_main_workspace, primary=True).pack(anchor="w", padx=22, pady=(0, 20))
+
+    def update_release_todo_summary(self):
+        completed = sum(variable.get() for variable in self.release_todo_status.values())
+        self.release_todo_summary.set(f"{completed} of {len(RELEASE_TODO_KEYS)} items completed on this device")
+
+    def save_release_todo_status(self):
+        self.settings["release_todo_status"] = {
+            key: variable.get()
+            for key, variable in self.release_todo_status.items()
+        }
+        self.persist_settings()
+        self.update_release_todo_summary()
+
+    def show_release_checklist(self):
+        page = self.show_page(
+            "Release checklist",
+            "Local progress tracker for the educational desktop release. Compliance items require independent professional confirmation.",
+        )
+        content = Frame(page, bg=BACKGROUND)
+        content.pack(fill=BOTH, expand=True, padx=42, pady=(4, 30))
+
+        summary = self.create_page_card(
+            content,
+            "Public-release readiness",
+            "Tick an item only when it is actually complete. Completion status is stored locally on this device.",
+        )
+        summary.pack(fill=X, pady=(0, 18))
+        Label(summary, textvariable=self.release_todo_summary, fg="#f5c95c", bg=PANEL, font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=22, pady=(0, 8))
+        logo_status = (
+            "Owned logo loaded from assets/VaultSignalsAI-logo.png."
+            if self.logo_image
+            else "Logo asset pending: add the supplied PNG at assets/VaultSignalsAI-logo.png, then rebuild the Windows package."
+        )
+        Label(summary, text=logo_status, fg=MUTED, bg=PANEL, wraplength=900, justify=LEFT, font=("Segoe UI", 8)).pack(anchor="w", padx=22, pady=(0, 18))
+
+        for group_title, items in RELEASE_TODO_GROUPS:
+            card = self.create_page_card(content, group_title, "Review and evidence each item before marking it complete.")
+            card.pack(fill=X, pady=(0, 14))
+            for key, label in items:
+                row = Frame(card, bg=PANEL)
+                row.pack(fill=X, padx=22, pady=(0, 9))
+                ttk.Checkbutton(
+                    row,
+                    text=label,
+                    variable=self.release_todo_status[key],
+                    command=self.save_release_todo_status,
+                    takefocus=True,
+                ).pack(anchor="w")
+
+        Label(
+            content,
+            text="This checklist is operational guidance only. It does not establish FCA approval, FCA authorisation, or legal compliance.",
+            fg="#68737f",
+            bg=BACKGROUND,
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", pady=(2, 0))
+
+    def show_settings(self):
+        page = self.show_page("Settings", "Control the local market-monitor behaviour and startup experience.")
+        content = Frame(page, bg=BACKGROUND)
+        content.pack(fill=BOTH, expand=True, padx=42, pady=(4, 30))
+
+        data = self.create_page_card(content, "Market data", "Changes apply immediately after saving.")
+        data.pack(fill=X, pady=(0, 18))
+        form = Frame(data, bg=PANEL)
+        form.pack(fill=X, padx=22, pady=(0, 14))
+        self.add_form_combo(form, "Price refresh", self.refresh_interval_choice, ["1", "2", "5"])
+        self.add_form_combo(form, "Default market", self.profile_market, SYMBOL_OPTIONS)
+        Label(data, text="Refresh values are in seconds. Candle history refreshes every minute.", fg=MUTED, bg=PANEL, font=("Segoe UI", 8)).pack(anchor="w", padx=22, pady=(0, 14))
+
+        startup = self.create_page_card(content, "Startup", "Choose how VaultSignalsAI opens on this device.")
+        startup.pack(fill=X, pady=(0, 18))
+        self.add_toggle_row(startup, "Show the 3-second VaultSignalsAI loading screen", self.splash_enabled)
+        self.add_toggle_row(startup, "Open in full screen after startup", self.start_fullscreen_enabled)
+
+        alerts = self.create_page_card(content, "High-impact market alerts", "Alerts use public price and volume data. They flag volatility, not a guaranteed opportunity or return.")
+        alerts.pack(fill=X, pady=(0, 18))
+        self.add_toggle_row(alerts, "Scan eligible liquid crypto markets for high-impact movement alerts", self.alerts_enabled)
+        alert_form = Frame(alerts, bg=PANEL)
+        alert_form.pack(fill=X, padx=22, pady=(0, 8))
+        self.add_form_combo(alert_form, "Minimum 24H movement", self.alert_threshold_choice, ["5", "8", "10"])
+        Label(
+            alerts,
+            text="The scanner evaluates USDT, USDC, and EUR spot markets. Alerts require the selected 24H movement threshold and at least $50M equivalent quote volume. Each market direction is limited to one alert every 30 minutes.",
+            fg=MUTED,
+            bg=PANEL,
+            wraplength=650,
+            justify=LEFT,
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", padx=22, pady=(0, 14))
+
+        scenario = self.create_page_card(content, "Chart scenario and public sentiment", "The overlay estimates an observed-volatility range from candles and an optional sentiment input.")
+        scenario.pack(fill=X, pady=(0, 18))
+        self.add_toggle_row(scenario, "Show the 12-hour scenario overlay on the market chart", self.scenario_overlay_enabled)
+        sentiment_form = Frame(scenario, bg=PANEL)
+        sentiment_form.pack(fill=X, padx=22, pady=(0, 8))
+        self.add_form_field(sentiment_form, "Optional HTTPS social sentiment connector", self.social_sentiment_url)
+        Label(
+            scenario,
+            text='A connector must return JSON with a numeric "score" from -100 to 100, plus optional "source" and "updated_at" fields. It should be a licensed public-data or social-listening provider; no social data is collected when this field is blank.',
+            fg=MUTED,
+            bg=PANEL,
+            wraplength=650,
+            justify=LEFT,
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", padx=22, pady=(0, 10))
+        self.create_button(scenario, "Refresh public sentiment", self.request_social_sentiment_refresh).pack(anchor="w", padx=22, pady=(0, 16))
+
+        actions = Frame(content, bg=BACKGROUND)
+        actions.pack(fill=X, pady=(2, 0))
+        self.create_button(actions, "Save settings", self.save_settings, primary=True).pack(side=LEFT)
+        self.create_button(actions, "Reset settings", self.reset_settings).pack(side=LEFT, padx=(8, 0))
+        self.create_button(actions, "Preview startup logo", self.preview_startup_logo).pack(side=LEFT, padx=(8, 0))
+        Label(actions, textvariable=self.settings_notice, fg=GREEN, bg=BACKGROUND, font=("Segoe UI", 9)).pack(side=LEFT, padx=14)
+
+    def select_followed_asset(self, _event=None):
+        selected = self.follow_symbol.get()
+        self.last_update.set(f"{self.display_symbol(selected)} selected. Select Open to start following it.")
+
+    def open_followed_asset(self):
+        self.active_symbol = self.follow_symbol.get()
+        self.market_name.set(self.display_symbol(self.active_symbol))
+        self.candles = []
+        self.latest_price = None
+        self.scenario = None
+        self.scenario_mid_text.set("Waiting for candles")
+        self.scenario_upper_text.set("Waiting for candles")
+        self.scenario_change_text.set("Waiting for candles")
+        self.visible_candle_count = DEFAULT_VISIBLE_CANDLES
+        self.chart_view = None
+        self.last_candle_symbol = ""
+        self.signal_text.set("LOADING")
+        self.signal_detail.set("Opening the live market monitor...")
+        self.chart_status.configure(text="Loading candle history...")
+        self.last_update.set(f"Opening {self.display_symbol(self.active_symbol)} live market monitor...")
+        self.draw_chart()
+
+    def social_sentiment_loop(self):
+        while self.running:
+            self.fetch_social_sentiment()
+            for _ in range(SOCIAL_SENTIMENT_REFRESH_SECONDS):
+                if not self.running:
+                    return
+                time.sleep(1)
+
+    def request_social_sentiment_refresh(self):
+        social_sentiment_url = self.social_sentiment_url.get().strip()
+        if not social_sentiment_url:
+            self.social_sentiment_score = None
+            self.social_sentiment_source = "No social sentiment connector configured"
+            self.social_sentiment_updated_at = ""
+            self.social_sentiment_text.set("CANDLE-ONLY")
+            self.recalculate_scenario()
+            self.settings_notice.set("No connector is configured, so the scenario uses candles only.")
+            return
+        if not social_sentiment_url.startswith("https://"):
+            self.settings_notice.set("The social sentiment connector must use a secure HTTPS URL.")
+            return
+        self.settings["social_sentiment_url"] = social_sentiment_url
+        self.social_sentiment_text.set("REFRESHING")
+        threading.Thread(target=self.fetch_social_sentiment, daemon=True).start()
+
+    def fetch_social_sentiment(self):
+        social_sentiment_url = self.settings["social_sentiment_url"]
+        if not social_sentiment_url:
+            self.data_queue.put(("social_sentiment_unavailable", "", "No social sentiment connector configured"))
+            return
+        try:
+            payload = self.fetch_json(social_sentiment_url)
+            self.data_queue.put(("social_sentiment", "", self.parse_social_sentiment(payload)))
+        except Exception as exc:
+            self.data_queue.put(("social_sentiment_error", "", str(exc)))
+
+    @staticmethod
+    def parse_social_sentiment(payload):
+        candidates = [payload]
+        if isinstance(payload, dict):
+            for key in ("data", "result", "sentiment"):
+                nested = payload.get(key)
+                if isinstance(nested, list) and nested:
+                    candidates.append(nested[0])
+                elif isinstance(nested, dict):
+                    candidates.append(nested)
+
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            raw_score = next(
+                (candidate[key] for key in ("score", "sentiment_score", "value") if key in candidate),
+                None,
+            )
+            try:
+                score = float(raw_score)
+            except (TypeError, ValueError):
+                continue
+            if -1 <= score <= 1:
+                score *= 100
+            elif 0 <= score <= 100:
+                score = (score - 50) * 2
+            if not -100 <= score <= 100:
+                continue
+            source = str(candidate.get("source") or candidate.get("provider") or "Configured public sentiment source").strip()
+            updated_at = str(candidate.get("updated_at") or candidate.get("timestamp") or "").strip()
+            return {"score": score, "source": source[:80], "updated_at": updated_at[:80]}
+        raise ValueError("The sentiment connector did not return a supported numeric score.")
+
+    def market_data_loop(self):
+        while self.running:
+            symbol = self.active_symbol
+            try:
+                ticker = self.fetch_json(f"https://api.binance.com/api/v3/ticker/24hr?symbol={symbol}")
+                self.data_queue.put(("ticker", symbol, ticker))
+
+                now = time.monotonic()
+                if now - self.last_depth_fetch >= 2:
+                    depth = self.fetch_json(f"https://api.binance.com/api/v3/depth?symbol={symbol}&limit=12")
+                    self.data_queue.put(("depth", symbol, depth))
+                    self.last_depth_fetch = now
+
+                if symbol != self.last_candle_symbol or now - self.last_candle_fetch >= CANDLE_REFRESH_SECONDS:
+                    candles = self.fetch_json(
+                        f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=1h&limit={CANDLE_HISTORY_LIMIT}"
+                    )
+                    self.data_queue.put(("candles", symbol, candles))
+                    self.last_candle_symbol = symbol
+                    self.last_candle_fetch = now
+            except Exception as exc:
+                self.data_queue.put(("error", symbol, str(exc)))
+
+            time.sleep(self.refresh_interval_seconds)
+
+    @staticmethod
+    def fetch_json(url):
+        request = urllib.request.Request(
+            url,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": f"VaultSignalsAI/{APP_VERSION}",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=8) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    @staticmethod
+    def version_key(version):
+        return tuple(
+            int(part)
+            for part in str(version).strip().lower().lstrip("v").split(".")
+            if part.isdigit()
+        )
+
+    def check_for_update(self):
+        self.update_button.configure(text="Checking...", state="disabled")
+        threading.Thread(target=self.fetch_latest_release, daemon=True).start()
+
+    def fetch_latest_release(self):
+        try:
+            release = self.fetch_json(GITHUB_LATEST_RELEASE_URL)
+            version = str(release.get("tag_name") or "").strip()
+            assets = release.get("assets") or []
+            asset = next(
+                (
+                    item
+                    for item in assets
+                    if str(item.get("name") or "").startswith("VaultSignalsAI-windows-x64-")
+                    and str(item.get("name") or "").endswith(".zip")
+                ),
+                None,
+            )
+            download_url = str(asset.get("browser_download_url") or "").strip() if isinstance(asset, dict) else ""
+            if not version or not download_url:
+                raise ValueError("No Windows desktop update is attached to the latest release.")
+            self.data_queue.put(("app_update", "", {"version": version, "download_url": download_url}))
+        except Exception as exc:
+            self.data_queue.put(("app_update_error", "", str(exc)))
+
+    def handle_update_result(self, release):
+        self.update_button.configure(text="Update", state="normal")
+        latest_version = str(release.get("version") or "")
+        if self.version_key(latest_version) <= self.version_key(self.app_version):
+            self.last_update.set(f"VaultSignalsAI {self.app_version} is up to date.")
+            messagebox.showinfo("VaultSignalsAI update", f"You already have the latest version ({self.app_version}).")
+            return
+
+        if messagebox.askyesno(
+            "VaultSignalsAI update",
+            f"Version {latest_version} is available. Open the Windows download now?",
+        ):
+            webbrowser.open_new_tab(release["download_url"])
+            self.last_update.set(f"Opened the {latest_version} Windows download.")
+        else:
+            self.last_update.set(f"Version {latest_version} is available from the Update button.")
+
+    def handle_update_error(self, message):
+        self.update_button.configure(text="Update", state="normal")
+        self.last_update.set("Could not check for a desktop update. Try again later.")
+        messagebox.showerror("VaultSignalsAI update", f"Could not check GitHub Releases.\n\n{message}")
+
+    def process_market_updates(self):
+        try:
+            while True:
+                message_type, symbol, data = self.data_queue.get_nowait()
+                if message_type == "markets":
+                    self.update_market_directory(data)
+                    continue
+                if message_type == "market_directory_error":
+                    self.market_directory_loading = False
+                    self.market_browser_status.set("Live market directory unavailable; showing the local fallback list.")
+                    continue
+                if message_type == "market_metrics":
+                    self.update_market_metrics(data)
+                    continue
+                if message_type == "market_metrics_error":
+                    self.market_browser_status.set("Market evaluation is temporarily unavailable; retrying automatically.")
+                    continue
+                if message_type == "social_sentiment":
+                    self.update_social_sentiment(data)
+                    continue
+                if message_type == "social_sentiment_unavailable":
+                    self.update_social_sentiment_unavailable(data)
+                    continue
+                if message_type == "social_sentiment_error":
+                    self.update_social_sentiment_error(data)
+                    continue
+                if message_type == "app_update":
+                    self.handle_update_result(data)
+                    continue
+                if message_type == "app_update_error":
+                    self.handle_update_error(data)
+                    continue
+                if symbol != self.active_symbol:
+                    continue
+                if message_type == "ticker":
+                    self.update_ticker(data)
+                elif message_type == "depth":
+                    self.update_depth(data)
+                elif message_type == "candles":
+                    self.update_candles(data)
+                elif message_type == "error":
+                    self.live_badge.configure(text="ÔùÅ RETRYING", fg="#f3b84b")
+                    self.last_update.set("Market connection interrupted; retrying automatically.")
+        except queue.Empty:
+            pass
+
+        if self.running:
+            self.root.after(120, self.process_market_updates)
+
+    def update_market_directory(self, markets):
+        self.market_directory = markets
+        self.market_directory_loaded = True
+        self.market_directory_loading = False
+        valid_symbols = {market["symbol"] for market in markets}
+        self.favorite_symbols.intersection_update(valid_symbols)
+        self.settings["favorite_symbols"] = sorted(self.favorite_symbols)
+        self.update_favorite_market_summary()
+        self.persist_settings()
+        self.update_quick_market_values()
+        self.render_market_results(preselect=self.follow_symbol.get())
+
+    def update_market_metrics(self, metrics):
+        self.market_metrics = metrics
+        self.render_market_results(preselect=self.selected_browser_symbol())
+        self.check_high_impact_market_alerts()
+
+    def update_ticker(self, data):
+        price = float(data.get("lastPrice", 0.0))
+        change = float(data.get("priceChangePercent", 0.0))
+        quote_volume = float(data.get("quoteVolume", 0.0))
+        high = float(data.get("highPrice", 0.0))
+        low = float(data.get("lowPrice", 0.0))
+        volume_ratio = quote_volume / max(high * 1000.0, 1.0)
+        direction, confidence, reason = self.compute_signal(change, volume_ratio)
+
+        self.latest_price = price
+        self.price_text.set(self.format_price(price))
+        self.change_text.set(f"{change:+.2f}%")
+        self.signal_text.set(direction.upper())
+        self.signal_detail.set(f"Indicator strength: {confidence}/100 ÔÇó {reason}")
+        self.volume_text.set(self.format_compact_number(quote_volume))
+        self.range_text.set(f"{self.format_price(low)} ÔÇö {self.format_price(high)}")
+        self.momentum_text.set(f"{volume_ratio:.2f}x")
+        self.trend_text.set("UPWARD" if change >= 0 else "DOWNWARD")
+        self.change_text_colour(change)
+        self.live_badge.configure(text="ÔùÅ LIVE", fg=GREEN)
+        self.last_update.set(f"Last price update: {datetime.now().strftime('%H:%M:%S')}  ÔÇó  refreshes every second")
+        self.recalculate_scenario()
+        self.draw_chart()
+
+    def update_social_sentiment(self, data):
+        self.social_sentiment_score = data["score"]
+        self.social_sentiment_source = data["source"]
+        self.social_sentiment_updated_at = data["updated_at"] or datetime.now().strftime("%d %b %Y %H:%M:%S")
+        self.social_sentiment_text.set(f"{self.social_sentiment_score:+.0f} / 100")
+        self.recalculate_scenario()
+        self.last_update.set("Public sentiment input refreshed; chart scenario recalculated.")
+
+    def update_social_sentiment_unavailable(self, message):
+        if self.social_sentiment_score is None:
+            self.social_sentiment_source = message
+            self.social_sentiment_updated_at = ""
+            self.social_sentiment_text.set("CANDLE-ONLY")
+            self.recalculate_scenario()
+
+    def update_social_sentiment_error(self, message):
+        if self.social_sentiment_score is None:
+            self.social_sentiment_source = f"Sentiment unavailable: {message}"
+            self.social_sentiment_updated_at = ""
+            self.social_sentiment_text.set("CANDLE-ONLY")
+            self.recalculate_scenario()
+
+    def check_high_impact_market_alerts(self):
+        """Alert on a single large, liquid public-market moveÔÇönever an asserted profit opportunity."""
+        if not self.alerts_enabled.get() or self.alert_popup:
+            return
+
+        candidates = []
+        allowed_symbols = {market["symbol"] for market in self.market_directory}
+        if self.restrict_alerts_to_favorites.get():
+            allowed_symbols.intersection_update(self.favorite_symbols)
+        for symbol, metrics in self.market_metrics.items():
+            if symbol not in allowed_symbols:
+                continue
+            if abs(metrics["change"]) < self.alert_threshold_percent:
+                continue
+            if metrics["quote_volume"] < ALERT_MIN_QUOTE_VOLUME:
+                continue
+            direction = "upward" if metrics["change"] > 0 else "downward"
+            alert_key = (symbol, direction)
+            if time.monotonic() - self.alert_cooldowns.get(alert_key, 0.0) < ALERT_COOLDOWN_SECONDS:
+                continue
+            candidates.append((self.market_score(symbol), symbol, metrics, direction))
+
+        if not candidates:
+            return
+        _score, symbol, metrics, direction = max(candidates, key=lambda item: item[0])
+        self.alert_cooldowns[(symbol, direction)] = time.monotonic()
+        self.show_high_impact_alert(symbol, metrics["change"], metrics["quote_volume"], direction)
+
+    def show_high_impact_alert(self, symbol, percent_change, quote_volume, direction):
+        self.alert_symbol = symbol
+        alert = self.alert_popup = Toplevel(self.root)
+        alert.title("VaultSignalsAI ÔÇó High-impact movement")
+        alert.configure(bg="#0d1117")
+        alert.resizable(False, False)
+        alert.transient(self.root)
+        alert.attributes("-topmost", True)
+        alert.protocol("WM_DELETE_WINDOW", self.dismiss_alert)
+
+        width, height = 440, 275
+        x = self.root.winfo_screenwidth() - width - 34
+        y = 70
+        alert.geometry(f"{width}x{height}+{x}+{y}")
+
+        Label(alert, text="HIGH-IMPACT MARKET MOVEMENT", fg="#f5c95c", bg="#0d1117", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=22, pady=(20, 4))
+        Label(alert, text=self.display_symbol(symbol), fg=TEXT, bg="#0d1117", font=("Segoe UI", 19, "bold")).pack(anchor="w", padx=22)
+        colour = GREEN if percent_change > 0 else RED
+        Label(
+            alert,
+            text=f"24H movement: {percent_change:+.2f}%  ÔÇó  {direction.title()} move",
+            fg=colour,
+            bg="#0d1117",
+            font=("Segoe UI", 11, "bold"),
+        ).pack(anchor="w", padx=22, pady=(6, 4))
+        Label(
+            alert,
+            text=f"Detected: {datetime.now().strftime('%d %b %Y  ÔÇó  %H:%M:%S')}",
+            fg="#8f9dab",
+            bg="#0d1117",
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", padx=22, pady=(0, 5))
+        Label(
+            alert,
+            text=f"Quote volume: {self.format_compact_number(quote_volume)} USDT\n"
+                 "This is a volatility alert based on public market data, not a profit guarantee or investment instruction.",
+            fg="#b8c3cf",
+            bg="#0d1117",
+            justify=LEFT,
+            wraplength=390,
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", padx=22, pady=(3, 15))
+
+        actions = Frame(alert, bg="#0d1117")
+        actions.pack(fill=X, padx=22, pady=(0, 18))
+        self.create_button(actions, "Open market", self.open_alert_market, primary=True).pack(side=LEFT)
+        self.create_button(actions, "Dismiss", self.dismiss_alert).pack(side=LEFT, padx=(8, 0))
+        self.root.bell()
+
+    def open_alert_market(self):
+        self.dismiss_alert()
+        self.show_main_workspace()
+        self.follow_symbol.set(self.alert_symbol)
+        self.profile_market.set(self.alert_symbol)
+        self.open_followed_asset()
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+        self.last_update.set(f"Opened {self.display_symbol(self.alert_symbol)} after a high-impact movement alert.")
+
+    def dismiss_alert(self):
+        if self.alert_popup:
+            self.alert_popup.destroy()
+            self.alert_popup = None
+        self.alert_symbol = ""
+
+    def update_depth(self, data):
+        asks = list(reversed(data.get("asks", [])[:6]))
+        bids = data.get("bids", [])[:6]
+        entries = asks + bids
+        for index, (price_label, amount_label) in enumerate(self.depth_rows):
+            if index < len(entries):
+                price, amount = entries[index]
+                price_label.configure(text=self.format_price(float(price)), fg=RED if index < len(asks) else GREEN)
+                amount_label.configure(text=f"{float(amount):.4f}")
+            else:
+                price_label.configure(text="--")
+                amount_label.configure(text="--")
+
+    def update_candles(self, data):
+        self.candles = [
+            {
+                "time": float(row[0]) / 1000,
+                "open": float(row[1]),
+                "high": float(row[2]),
+                "low": float(row[3]),
+                "close": float(row[4]),
+                "volume": float(row[5]),
+            }
+            for row in data
+        ]
+        self.visible_candle_count = min(self.visible_candle_count, len(self.candles))
+        self.recalculate_scenario()
+        self.update_chart_status()
+        self.draw_chart()
+
+    def zoom_in(self, _event=None):
+        if not self.candles:
             return "break"
-        self.signal_tree.yview_scroll(int(-event.delta / 120), "units")
+        self.visible_candle_count = max(MIN_VISIBLE_CANDLES, int(self.visible_candle_count / 1.35))
+        self.update_chart_status()
+        self.draw_chart()
         return "break"
 
-    def on_signal_scroll_up(self, _event: tk.Event) -> str:
-        self.signal_tree.yview_scroll(-1, "units")
+    def zoom_out(self, _event=None):
+        if not self.candles:
+            return "break"
+        self.visible_candle_count = min(len(self.candles), int(self.visible_candle_count * 1.35) + 1)
+        self.update_chart_status()
+        self.draw_chart()
         return "break"
 
-    def on_signal_scroll_down(self, _event: tk.Event) -> str:
-        self.signal_tree.yview_scroll(1, "units")
-        return "break"
+    def reset_chart_zoom(self):
+        if not self.candles:
+            return
+        self.visible_candle_count = min(DEFAULT_VISIBLE_CANDLES, len(self.candles))
+        self.update_chart_status()
+        self.draw_chart()
 
-    def on_close(self) -> None:
-        self.stop_event.set()
-        self.sync_running = False
+    def on_chart_wheel(self, event):
+        return self.zoom_in() if event.delta > 0 else self.zoom_out()
 
-        self.config = self.collect_config()
-        save_config(self.config)
+    def update_chart_status(self):
+        total = len(self.candles)
+        visible = min(self.visible_candle_count, total)
+        self.chart_status.configure(text=f"1H candles ÔÇó {visible} of {total} ÔÇó mouse wheel to zoom")
+        self.zoom_label.configure(text=f"ZOOM: {visible} candles")
 
+    @staticmethod
+    def compute_signal(percent_change, volume_ratio):
+        if percent_change > 1.2 and volume_ratio > 1.0:
+            return "Bullish", 82, "Recent price strength is supported by active volume."
+        if percent_change < -1.2 and volume_ratio < 1.0:
+            return "Bearish", 78, "Recent weakness continues with softer participation."
+        if abs(percent_change) < 0.6:
+            return "Neutral", 58, "Price is contained and short-term direction is mixed."
+        return "Watch", 66, "Momentum is present, but follow-through needs confirmation."
+
+    def recalculate_scenario(self):
+        if len(self.candles) < 24:
+            self.scenario = None
+            self.scenario_mid_text.set("Waiting for 24 candles")
+            self.scenario_upper_text.set("Waiting for 24 candles")
+            self.scenario_change_text.set("Waiting for 24 candles")
+            return
+
+        candles = self.candles[-min(SCENARIO_LOOKBACK_CANDLES, len(self.candles)):]
+        closes = [candle["close"] for candle in candles]
+        returns = [
+            current / previous - 1
+            for previous, current in zip(closes, closes[1:])
+            if previous > 0
+        ]
+        if len(returns) < 12:
+            self.scenario = None
+            self.scenario_change_text.set("Waiting for candle history")
+            return
+
+        recent_returns = returns[-12:]
+        drift = sum(recent_returns) / len(recent_returns)
+        mean_return = sum(returns) / len(returns)
+        volatility = math.sqrt(sum((value - mean_return) ** 2 for value in returns) / len(returns))
+        volatility = max(volatility, 0.0025)
+
+        recent_volume = sum(candle["volume"] for candle in candles[-12:]) / 12
+        earlier_volume = sum(candle["volume"] for candle in candles[:-12]) / max(len(candles) - 12, 1)
+        relative_volume = recent_volume / max(earlier_volume, 1.0)
+        volume_adjustment = max(-1.0, min(relative_volume - 1.0, 1.0)) * 0.00035
+        sentiment_adjustment = (self.social_sentiment_score or 0.0) / 100 * 0.00020
+        hourly_drift = max(-0.004, min(drift + volume_adjustment + sentiment_adjustment, 0.004))
+        reference_price = self.latest_price or closes[-1]
+
+        points = [{"hour": 0, "midpoint": reference_price, "lower": reference_price, "upper": reference_price}]
+        for hour in range(1, SCENARIO_HORIZON_HOURS + 1):
+            midpoint = reference_price * (1 + hourly_drift * hour)
+            spread = reference_price * volatility * math.sqrt(hour) * 1.15
+            points.append(
+                {
+                    "hour": hour,
+                    "midpoint": midpoint,
+                    "lower": max(0.0, midpoint - spread),
+                    "upper": midpoint + spread,
+                }
+            )
+
+        final_point = points[-1]
+        self.scenario = {
+            "as_of": datetime.now(),
+            "reference_price": reference_price,
+            "points": points,
+            "midpoint": final_point["midpoint"],
+            "lower": final_point["lower"],
+            "upper": final_point["upper"],
+            "volatility": volatility,
+        }
+        self.scenario_mid_text.set(f"{self.format_price(final_point['midpoint'])} ÔÇó 12H")
+        self.scenario_upper_text.set(f"{self.format_price(final_point['upper'])} ÔÇó 12H")
+        midpoint_change = (final_point["midpoint"] / reference_price - 1) * 100
+        upper_change = (final_point["upper"] / reference_price - 1) * 100
+        self.scenario_change_text.set(f"Mid {midpoint_change:+.2f}% ÔÇó upper {upper_change:+.2f}%")
+
+    def change_text_colour(self, percent_change):
+        colour = GREEN if percent_change >= 0 else RED
+        self.signal_value.configure(fg=colour if self.signal_text.get() != "WATCH" else BLUE)
+        for child in self.workspace.grid_slaves(row=1, column=2):
+            self.update_named_value_colour(child, self.change_text, colour)
+
+    def update_named_value_colour(self, widget, value, colour):
+        if isinstance(widget, Label) and str(widget.cget("textvariable")) == str(value):
+            widget.configure(fg=colour)
+        for child in widget.winfo_children():
+            self.update_named_value_colour(child, value, colour)
+
+    def draw_chart(self):
+        canvas = self.chart_canvas
+        canvas.delete("all")
+        width = max(canvas.winfo_width(), 300)
+        height = max(canvas.winfo_height(), 260)
+        canvas.create_rectangle(0, 0, width, height, fill=BACKGROUND, outline="")
+
+        chart_left = 16
+        chart_right = width - 72
+        chart_top = 18
+        volume_height = max(58, int(height * 0.18))
+        chart_bottom = height - volume_height - 22
+        if chart_right <= chart_left or chart_bottom <= chart_top:
+            return
+
+        for index in range(6):
+            y = chart_top + index * (chart_bottom - chart_top) / 5
+            canvas.create_line(chart_left, y, chart_right, y, fill=GRID, width=1)
+        for index in range(7):
+            x = chart_left + index * (chart_right - chart_left) / 6
+            canvas.create_line(x, chart_top, x, chart_bottom, fill="#11161d", width=1)
+
+        if not self.candles:
+            self.chart_view = None
+            canvas.create_text(width / 2, height / 2, text="Loading live candle history...", fill=MUTED, font=("Segoe UI", 11))
+            return
+
+        visible = self.candles[-min(self.visible_candle_count, len(self.candles)):]
+        scenario = self.scenario if self.scenario_overlay_enabled.get() and self.scenario else None
+        forecast_width = min(170, (chart_right - chart_left) * 0.24) if scenario else 0
+        history_right = chart_right - forecast_width
+        lows = [item["low"] for item in visible]
+        highs = [item["high"] for item in visible]
+        if scenario:
+            lows.extend(point["lower"] for point in scenario["points"])
+            highs.extend(point["upper"] for point in scenario["points"])
+        low_value = min(lows)
+        high_value = max(highs)
+        price_range = max(high_value - low_value, max(high_value * 0.002, 0.01))
+        padding = price_range * 0.05
+        low_value -= padding
+        high_value += padding
+        price_range = high_value - low_value
+        max_volume = max(item["volume"] for item in visible) or 1.0
+        step = (history_right - chart_left) / len(visible)
+        body_width = max(1, min(8, step * 0.62))
+        self.chart_view = {
+            "candles": visible,
+            "chart_left": chart_left,
+            "chart_right": history_right,
+            "chart_top": chart_top,
+            "chart_bottom": chart_bottom,
+            "low_value": low_value,
+            "price_range": price_range,
+            "step": step,
+        }
+
+        for index, candle in enumerate(visible):
+            x = chart_left + (index + 0.5) * step
+            y_high = self.price_to_y(candle["high"], low_value, price_range, chart_top, chart_bottom)
+            y_low = self.price_to_y(candle["low"], low_value, price_range, chart_top, chart_bottom)
+            y_open = self.price_to_y(candle["open"], low_value, price_range, chart_top, chart_bottom)
+            y_close = self.price_to_y(candle["close"], low_value, price_range, chart_top, chart_bottom)
+            colour = GREEN if candle["close"] >= candle["open"] else RED
+            canvas.create_line(x, y_high, x, y_low, fill=colour, width=1)
+            canvas.create_rectangle(x - body_width / 2, min(y_open, y_close), x + body_width / 2, max(y_open, y_close, min(y_open, y_close) + 1), fill=colour, outline=colour)
+
+            volume_top = chart_bottom + 9
+            volume_bottom = height - 16
+            volume_bar_height = (candle["volume"] / max_volume) * (volume_bottom - volume_top)
+            canvas.create_rectangle(x - body_width / 2, volume_bottom - volume_bar_height, x + body_width / 2, volume_bottom, fill=colour, outline="")
+
+        if scenario:
+            self.draw_scenario_overlay(
+                canvas,
+                scenario,
+                history_right,
+                chart_right,
+                chart_top,
+                chart_bottom,
+                low_value,
+                price_range,
+            )
+
+        for index in range(6):
+            value = high_value - index * price_range / 5
+            y = chart_top + index * (chart_bottom - chart_top) / 5
+            canvas.create_text(chart_right + 8, y, text=self.format_price(value), fill=MUTED, anchor="w", font=("Cascadia Mono", 8))
+
+        for index in range(5):
+            candle = visible[round(index * (len(visible) - 1) / 4)]
+            date_label = datetime.fromtimestamp(candle["time"]).strftime("%d %b")
+            x = chart_left + index * (history_right - chart_left) / 4
+            canvas.create_text(x, height - 5, text=date_label, fill="#64707d", anchor="s", font=("Segoe UI", 8))
+
+        if self.latest_price is not None:
+            y = self.price_to_y(self.latest_price, low_value, price_range, chart_top, chart_bottom)
+            if chart_top <= y <= chart_bottom:
+                canvas.create_line(chart_left, y, history_right, y, fill="#367560", dash=(3, 4))
+                canvas.create_text(chart_right + 8, y, text=self.format_price(self.latest_price), fill="#9cf0cc", anchor="w", font=("Cascadia Mono", 8, "bold"))
+
+    def draw_scenario_overlay(self, canvas, scenario, start_x, end_x, chart_top, chart_bottom, low_value, price_range):
+        points = scenario["points"]
+        width = end_x - start_x
+        colour = GREEN if scenario["midpoint"] >= scenario["reference_price"] else RED
+        fill = "#102b23" if colour == GREEN else "#2a151b"
+        coordinates = []
+        for point in points:
+            x = start_x + width * point["hour"] / SCENARIO_HORIZON_HOURS
+            y = self.price_to_y(point["upper"], low_value, price_range, chart_top, chart_bottom)
+            coordinates.extend((x, y))
+        for point in reversed(points):
+            x = start_x + width * point["hour"] / SCENARIO_HORIZON_HOURS
+            y = self.price_to_y(point["lower"], low_value, price_range, chart_top, chart_bottom)
+            coordinates.extend((x, y))
+        canvas.create_polygon(*coordinates, fill=fill, outline="", stipple="gray25")
+        canvas.create_line(start_x, chart_top, start_x, chart_bottom, fill="#526171", dash=(3, 3))
+
+        midpoint_coordinates = []
+        for point in points:
+            x = start_x + width * point["hour"] / SCENARIO_HORIZON_HOURS
+            y = self.price_to_y(point["midpoint"], low_value, price_range, chart_top, chart_bottom)
+            midpoint_coordinates.extend((x, y))
+        canvas.create_line(*midpoint_coordinates, fill=colour, width=2, dash=(5, 3))
+        canvas.create_text(
+            start_x + 6,
+            chart_top + 10,
+            text="12H SCENARIO",
+            fill="#b9c6d2",
+            anchor="w",
+            font=("Segoe UI", 7, "bold"),
+        )
+
+    def on_chart_motion(self, event):
+        if not self.chart_view:
+            return
+
+        view = self.chart_view
+        if not (view["chart_left"] <= event.x <= view["chart_right"] and view["chart_top"] <= event.y <= view["chart_bottom"]):
+            self.clear_chart_crosshair()
+            return
+
+        index = min(int((event.x - view["chart_left"]) / view["step"]), len(view["candles"]) - 1)
+        candle = view["candles"][index]
+        x = view["chart_left"] + (index + 0.5) * view["step"]
+        price = view["low_value"] + ((view["chart_bottom"] - event.y) / (view["chart_bottom"] - view["chart_top"])) * view["price_range"]
+        detail = (
+            f"{datetime.fromtimestamp(candle['time']).strftime('%d %b %Y %H:%M')}   "
+            f"O {self.format_price(candle['open'])}   H {self.format_price(candle['high'])}   "
+            f"L {self.format_price(candle['low'])}   C {self.format_price(candle['close'])}"
+        )
+
+        self.chart_canvas.delete("crosshair")
+        self.chart_canvas.create_line(x, view["chart_top"], x, view["chart_bottom"], fill="#56616f", dash=(3, 3), tags="crosshair")
+        self.chart_canvas.create_line(view["chart_left"], event.y, view["chart_right"], event.y, fill="#56616f", dash=(3, 3), tags="crosshair")
+        self.chart_canvas.create_rectangle(
+            view["chart_left"] + 7,
+            view["chart_top"] + 7,
+            view["chart_left"] + 370,
+            view["chart_top"] + 29,
+            fill="#10151d",
+            outline="#2a3442",
+            tags="crosshair",
+        )
+        self.chart_canvas.create_text(
+            view["chart_left"] + 13,
+            view["chart_top"] + 18,
+            text=detail,
+            fill="#d7e0eb",
+            anchor="w",
+            font=("Cascadia Mono", 7),
+            tags="crosshair",
+        )
+        self.chart_canvas.create_text(
+            view["chart_right"] + 8,
+            event.y,
+            text=self.format_price(price),
+            fill="#d7e0eb",
+            anchor="w",
+            font=("Cascadia Mono", 8, "bold"),
+            tags="crosshair",
+        )
+
+    def clear_chart_crosshair(self, _event=None):
+        self.chart_canvas.delete("crosshair")
+
+    @staticmethod
+    def price_to_y(value, low_value, price_range, chart_top, chart_bottom):
+        return chart_bottom - ((value - low_value) / price_range) * (chart_bottom - chart_top)
+
+    @staticmethod
+    def format_price(value):
+        if value >= 1000:
+            return f"${value:,.2f}"
+        if value >= 1:
+            return f"${value:,.4f}"
+        return f"${value:.6f}"
+
+    @staticmethod
+    def format_compact_number(value):
+        if value >= 1_000_000_000:
+            return f"{value / 1_000_000_000:.2f}B"
+        if value >= 1_000_000:
+            return f"{value / 1_000_000:.2f}M"
+        if value >= 1_000:
+            return f"{value / 1_000:.2f}K"
+        return f"{value:.0f}"
+
+    def toggle_fullscreen(self, _event=None):
+        self.is_fullscreen = not self.is_fullscreen
+        self.root.attributes("-fullscreen", self.is_fullscreen)
+        self.fullscreen_button.configure(text="Exit full screen" if self.is_fullscreen else "Full screen")
+
+    def exit_fullscreen(self, _event=None):
+        if self.is_fullscreen:
+            self.toggle_fullscreen()
+
+    def minimize_window(self):
+        self.exit_fullscreen()
+        self.root.iconify()
+
+    def close_window(self):
+        self.running = False
         self.root.destroy()
 
 
-def main() -> None:
-    root = tk.Tk()
-    VaultSignalsApp(root)
+def main():
+    if sys.platform == "win32":
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(WINDOWS_APP_ID)
+        except AttributeError:
+            pass
+
+    root = Tk()
+    root.withdraw()
+    MarketSignalApp(root)
     root.mainloop()
 
 
