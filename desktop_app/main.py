@@ -36,7 +36,7 @@ from tkinter import (
 from tkinter import messagebox
 
 APP_TITLE = "VaultSignalsAI"
-APP_VERSION = "v1.0.15"
+APP_VERSION = "v1.0.16"
 WINDOWS_APP_ID = "VaultSignalsAI.Desktop"
 REFRESH_INTERVAL_SECONDS = 1
 CANDLE_REFRESH_SECONDS = 60
@@ -291,8 +291,10 @@ class MarketSignalApp:
 
         top_actions = Frame(top, bg="#090c10")
         top_actions.pack(side=RIGHT, padx=16, pady=12)
-        self.update_button = self.create_button(top_actions, "Update", self.check_for_update)
+        self.update_button = self.create_button(top_actions, "Update", self.check_for_update, primary=True)
         self.update_button.pack(side=LEFT, padx=(0, 8))
+        self.update_button.pack_forget()
+        self.update_button.bind("<Button-1>", lambda _evt: self.check_for_update())
         self.fullscreen_button = self.create_button(top_actions, "Full screen", self.toggle_fullscreen)
         self.fullscreen_button.pack(side=LEFT, padx=(0, 8))
         self.create_button(top_actions, "Minimize", self.minimize_window).pack(side=LEFT, padx=(0, 8))
@@ -417,6 +419,7 @@ class MarketSignalApp:
         Label(nav_header, text="Workspace", fg=TEXT, bg="#0d1117", font=("Segoe UI", 14, "bold")).pack(anchor="w")
 
         self.add_nav_button("Crypto markets", self.show_crypto_markets)
+        self.add_nav_button("Workflow", self.show_workflow_dashboard)
         self.add_nav_button("Scenario report", self.show_scenario_report)
         self.add_nav_button("Learn & risk", self.show_learning_and_risk)
         self.add_nav_button("Release checklist", self.show_release_checklist)
@@ -1041,6 +1044,7 @@ class MarketSignalApp:
             return
         self.follow_symbol.set(symbol)
         self.profile_market.set(symbol)
+        self.show_main_workspace()
         self.open_followed_asset()
         self.close_market_browser()
 
@@ -1231,10 +1235,110 @@ class MarketSignalApp:
             self.nav_toggle.configure(text="›")
             self.nav_toggle.lift()
 
+    @staticmethod
+    def rank_watchlist_symbols(symbols, metrics):
+        ranked = []
+        for symbol in symbols:
+            metric = metrics.get(symbol) or {}
+            change = float(metric.get("change", 0.0) or 0.0)
+            volume = float(metric.get("quote_volume", 0.0) or 0.0)
+            if not metric:
+                continue
+            score = abs(change) * (1 + min(volume / 50_000_000.0, 20.0))
+            ranked.append((symbol, score, change, volume))
+        ranked.sort(key=lambda item: (-item[1], -abs(item[2]), item[0]))
+        return ranked
+
+    @staticmethod
+    def summarize_market_brief(symbol, metrics):
+        if not metrics:
+            return "No live market snapshot is available yet. The view will update once the exchange feed responds."
+        change = float(metrics.get("change", 0.0) or 0.0)
+        price = float(metrics.get("price", 0.0) or 0.0)
+        volume = float(metrics.get("quote_volume", 0.0) or 0.0)
+
+        if change > 5.0:
+            bias = "strong upside"
+        elif change > 1.5:
+            bias = "firm upside"
+        elif change < -5.0:
+            bias = "strong downside"
+        elif change < -1.5:
+            bias = "soft downside"
+        else:
+            bias = "balanced"
+
+        if volume > 200_000_000:
+            volume_text = "heavy volume"
+        elif volume > 50_000_000:
+            volume_text = "healthy volume"
+        else:
+            volume_text = "light volume"
+
+        direction = "rising" if change >= 0 else "pulling back"
+        return (
+            f"{symbol} is {bias} with {direction} price action at {price:,.2f}. "
+            f"The market is showing {volume_text} and a {abs(change):.2f}% move in the current cycle."
+        )
+
     def show_crypto_markets(self):
         self.show_main_workspace()
         self.last_update.set("Opening evaluated crypto markets.")
         self.open_market_browser()
+
+    def show_workflow_dashboard(self):
+        page = self.show_page(
+            "Workflow dashboard",
+            "A compact desk view for active market scanning, watchlist ranking, and daily automation priorities.",
+        )
+        content = Frame(page, bg=BACKGROUND)
+        content.pack(fill=BOTH, expand=True, padx=42, pady=(4, 30))
+
+        overview = self.create_page_card(
+            content,
+            "Market workflow overview",
+            "Prioritise the strongest movers, monitor active favourites, and keep the desk focused on the highest-energy setups.",
+        )
+        overview.pack(fill=X, pady=(0, 18))
+
+        watchlist_symbols = sorted(self.favorite_symbols) if self.favorite_symbols else list(SYMBOL_OPTIONS)
+        ranked_symbols = self.rank_watchlist_symbols(watchlist_symbols, self.market_metrics)
+        if not ranked_symbols:
+            ranked_symbols = [(self.active_symbol, 0.0, 0.0, 0.0)]
+
+        summary = Frame(overview, bg=PANEL)
+        summary.pack(fill=X, padx=22, pady=(0, 14))
+        watchlist_text = ", ".join(symbol for symbol, *_ in ranked_symbols[:5]) if ranked_symbols else "No evaluated markets"
+        Label(summary, text=f"Priority watchlist: {watchlist_text}", fg="#dce8f6", bg=PANEL, font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=22, pady=(14, 4))
+        Label(
+            summary,
+            text="The ranking blends price momentum with quote volume so high-energy markets rise to the top of the desk before lower-volume noise.",
+            fg=MUTED,
+            bg=PANEL,
+            wraplength=800,
+            justify=LEFT,
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", padx=22, pady=(0, 14))
+
+        grid = Frame(content, bg=BACKGROUND)
+        grid.pack(fill=BOTH, expand=True)
+        for index, (symbol, _, change, volume) in enumerate(ranked_symbols[:5]):
+            card = self.create_page_card(grid, f"{index + 1}. {self.display_symbol(symbol)}", "Desk priority")
+            card.pack(fill=X, pady=(0, 12))
+            metrics = self.market_metrics.get(symbol, {})
+            summary_text = self.summarize_market_brief(symbol, metrics)
+            Label(card, text=summary_text, fg="#c6d1dc", bg=PANEL, wraplength=780, justify=LEFT, font=("Segoe UI", 9)).pack(anchor="w", padx=22, pady=(0, 10))
+            detail = Frame(card, bg=PANEL)
+            detail.pack(fill=X, padx=22, pady=(0, 18))
+            Label(detail, text=f"Change: {float(change):+.2f}%", fg=GREEN if change >= 0 else RED, bg=PANEL, font=("Segoe UI", 9, "bold")).pack(side=LEFT, padx=(0, 16))
+            Label(detail, text=f"Volume: {self.format_compact_number(float(volume))}", fg=TEXT, bg=PANEL, font=("Segoe UI", 9, "bold")).pack(side=LEFT, padx=(0, 16))
+            Label(detail, text=f"Status: {'monitoring' if metrics else 'waiting for feed'}", fg=MUTED, bg=PANEL, font=("Segoe UI", 9)).pack(side=LEFT)
+
+        actions = Frame(content, bg=BACKGROUND)
+        actions.pack(fill=X, pady=(12, 0))
+        self.create_button(actions, "Open market browser", self.show_crypto_markets, primary=True).pack(side=LEFT)
+        self.create_button(actions, "Open scenario report", self.show_scenario_report).pack(side=LEFT, padx=(8, 0))
+        self.create_button(actions, "Open account", self.show_account).pack(side=LEFT, padx=(8, 0))
 
     def show_account(self):
         page = self.show_page("Account", "Manage local profile, market, and future notification preferences.")
@@ -1641,11 +1745,21 @@ class MarketSignalApp:
 
     @staticmethod
     def version_key(version):
-        return tuple(
-            int(part)
-            for part in str(version).strip().lower().lstrip("v").split(".")
-            if part.isdigit()
-        )
+        version = str(version).strip().lower().lstrip("v")
+        if not version:
+            return (0, 0, 0)
+        parts = []
+        for part in version.split("."):
+            digits = "".join(ch for ch in part if ch.isdigit())
+            if digits:
+                parts.append(int(digits))
+            else:
+                parts.append(0)
+        return tuple(parts)
+
+    @staticmethod
+    def is_update_available(current_version, latest_version):
+        return MarketSignalApp.version_key(latest_version) > MarketSignalApp.version_key(current_version)
 
     def check_for_update(self):
         self.update_button.configure(text="Checking...", state="disabled")
@@ -1673,24 +1787,24 @@ class MarketSignalApp:
             self.data_queue.put(("app_update_error", "", str(exc)))
 
     def handle_update_result(self, release):
-        self.update_button.configure(text="Update", state="normal")
         latest_version = str(release.get("version") or "")
-        if self.version_key(latest_version) <= self.version_key(self.app_version):
+        if not self.is_update_available(self.app_version, latest_version):
+            self.update_button.pack_forget()
             self.last_update.set(f"VaultSignalsAI {self.app_version} is up to date.")
-            messagebox.showinfo("VaultSignalsAI update", f"You already have the latest version ({self.app_version}).")
             return
 
+        self.update_button.configure(text="Update", state="normal")
+        self.update_button.pack(side=LEFT, padx=(0, 8))
+        self.last_update.set(f"Version {latest_version} is available.")
         if messagebox.askyesno(
             "VaultSignalsAI update",
             f"Version {latest_version} is available. Open the Windows download now?",
         ):
             webbrowser.open_new_tab(release["download_url"])
             self.last_update.set(f"Opened the {latest_version} Windows download.")
-        else:
-            self.last_update.set(f"Version {latest_version} is available from the Update button.")
 
     def handle_update_error(self, message):
-        self.update_button.configure(text="Update", state="normal")
+        self.update_button.pack_forget()
         self.last_update.set("Could not check for a desktop update. Try again later.")
         messagebox.showerror("VaultSignalsAI update", f"Could not check GitHub Releases.\n\n{message}")
 
